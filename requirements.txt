@@ -1,0 +1,12 @@
+# Upstox API v2 Requirements
+upstox-python-sdk
+pandas
+numpy
+scipy
+pyarrow
+fastparquet
+python-dotenv
+requests
+vaderSentiment
+beautifulsoup4
+feedparser

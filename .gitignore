@@ -1,0 +1,16 @@
+# Environments
+.env 
+
+# Gemini
+.agents/
+.ag-memory.json
+scratch/
+backend/scratch/
+tests/
+
+#Logs
+ppo_trading_tensorboard/
+
+#Project Specific
+Material/
+bench_vectorized.py
