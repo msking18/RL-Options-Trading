@@ -1,9 +1,10 @@
 import os
+import multiprocessing
 import argparse
 from datetime import datetime
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.wrappers import ActionMasker
-from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor, VecNormalize
+from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv, VecMonitor, VecNormalize
 from stable_baselines3.common.callbacks import BaseCallback
 from backend.train.ppo_config import (
     get_ppo_params, TRAINING_SYMBOLS, MODEL_DIR, LOG_DIR, 
@@ -89,8 +90,24 @@ def train():
     temp_env = TradingEnv(symbols=symbols)
     preloaded_data = temp_env.all_dfs
     
+    # Determine vectorized environment type
+    if args.num_envs > 1:
+        # For multiple environments, use SubprocVecEnv with 'fork' for Linux speed 
+        # (or 'spawn' if 'fork' has issues, but 'fork' is standard in Docker)
+        try:
+            multiprocessing.set_start_method('fork', force=True)
+        except RuntimeError:
+            pass
+        
+        env_class = SubprocVecEnv
+        print(f"Using SubprocVecEnv with {args.num_envs} workers.")
+    else:
+        # For single environment, DummyVecEnv is much more stable and avoids multiprocessing bugs
+        env_class = DummyVecEnv
+        print("Using DummyVecEnv for stability.")
+
     # Create multiple environments
-    env = SubprocVecEnv([
+    env = env_class([
         make_env(
             symbols, 30, INITIAL_CAPITAL, 0.001, i, 
             preloaded_data=preloaded_data,

@@ -12,7 +12,7 @@ beautifulsoup4
 feedparser
 
 # RL & ML Frameworks
-stable-baselines3[extra]
+stable-baselines3
 sb3-contrib
 gymnasium
 shimmy

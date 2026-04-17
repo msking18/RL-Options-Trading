@@ -33,6 +33,10 @@ main:
 
     - check_training_status:
         switch:
+          - condition: '${"failedCount" in training_status_response.body.status and training_status_response.body.status.failedCount > 0}'
+            next: training_failed
+          - condition: '${"cancelledCount" in training_status_response.body.status and training_status_response.body.status.cancelledCount > 0}'
+            next: training_failed
           - condition: '${not("completionTime" in training_status_response.body.status)}'
             next: sleep_training
           - condition: '${training_status_response.body.status.conditions[0].status == "True"}'
@@ -73,6 +77,10 @@ main:
 
     - check_eval_status:
         switch:
+          - condition: '${"failedCount" in eval_status_response.body.status and eval_status_response.body.status.failedCount > 0}'
+            next: eval_failed
+          - condition: '${"cancelledCount" in eval_status_response.body.status and eval_status_response.body.status.cancelledCount > 0}'
+            next: eval_failed
           - condition: '${not("completionTime" in eval_status_response.body.status)}'
             next: sleep_evaluation
           - condition: '${eval_status_response.body.status.conditions[0].status == "True"}'
