@@ -10,3 +10,16 @@ requests
 vaderSentiment
 beautifulsoup4
 feedparser
+
+# RL & ML Frameworks
+stable-baselines3
+sb3-contrib
+gymnasium
+shimmy
+
+# Reporting & Visualization
+xlsxwriter
+tensorboard
+
+# Cloud Integration
+google-cloud-storage

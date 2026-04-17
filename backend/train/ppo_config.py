@@ -2,10 +2,10 @@ import os
 import json
 
 # --- Directory Configuration ---
-MODEL_DIR = "backend/models"
-REPORT_DIR = "reports"
+MODEL_DIR = os.getenv("MODEL_DIR", "backend/models")
+REPORT_DIR = os.getenv("REPORT_DIR", "reports")
 EVAL_DIR = os.path.join(REPORT_DIR, "evaluations")
-LOG_DIR = "ppo_trading_tensorboard"
+LOG_DIR = os.getenv("LOG_DIR", "ppo_trading_tensorboard")
 
 # --- Training Configuration ---
 TOTAL_TIMESTEPS = 5_000_000 # Increased for vectorized environment depth

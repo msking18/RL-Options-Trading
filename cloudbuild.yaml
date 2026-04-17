@@ -1,0 +1,14 @@
+steps:
+  # Build the container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'us-central1-docker.pkg.dev/$PROJECT_ID/rl-options-repo/rl-options-agent', '.']
+  
+  # Push the container image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'us-central1-docker.pkg.dev/$PROJECT_ID/rl-options-repo/rl-options-agent']
+
+images:
+  - 'us-central1-docker.pkg.dev/$PROJECT_ID/rl-options-repo/rl-options-agent'
+
+options:
+  logging: CLOUD_LOGGING_ONLY

@@ -1,0 +1,40 @@
+name: Deploy to GCP
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Google Auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: '${{ secrets.GCP_WIF_PROVIDER }}'
+          service_account: '${{ secrets.GCP_SA_EMAIL }}'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: |
+          gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+
+      - name: Build and Push Docker Image
+        run: |
+          docker build -t us-central1-docker.pkg.dev/rl-options-training/rl-options-repo/rl-options-agent:latest .
+          docker push us-central1-docker.pkg.dev/rl-options-training/rl-options-repo/rl-options-agent:latest
+
+      # Post-deployment: Optional trigger for the Workflow to start training
+      # - name: Trigger Training Workflow
+      #   run: |
+      #     gcloud workflows executions execute rl-options-workflow --location=us-central1
