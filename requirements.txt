@@ -12,10 +12,12 @@ beautifulsoup4
 feedparser
 
 # RL & ML Frameworks
-stable-baselines3
+stable-baselines3[extra]
 sb3-contrib
 gymnasium
 shimmy
+tqdm
+rich
 
 # Reporting & Visualization
 xlsxwriter

@@ -12,20 +12,20 @@ main:
     - trigger_training:
         call: http.post
         args:
-          url: ${"https://" + location + "-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/" + project_id + "/jobs/" + training_job_name + ":run"}
+          url: '${"https://" + location + "-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/" + project_id + "/jobs/" + training_job_name + ":run"}'
           auth:
             type: OAuth2
         result: training_trigger_response
 
     - wait_for_training:
         assign:
-          - training_execution_name: ${training_trigger_response.body.metadata.name}
+          - training_execution_name: '${training_trigger_response.body.metadata.name}'
         next: poll_training
 
     - poll_training:
         call: http.get
         args:
-          url: ${"https://" + location + "-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/" + project_id + "/executions/" + training_execution_name}
+          url: '${"https://" + location + "-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/" + project_id + "/executions/" + training_execution_name}'
           auth:
             type: OAuth2
         result: training_status_response
@@ -33,9 +33,9 @@ main:
 
     - check_training_status:
         switch:
-          - condition: ${not("completionTime" in training_status_response.body.status)}
+          - condition: '${not("completionTime" in training_status_response.body.status)}'
             next: sleep_training
-          - condition: ${training_status_response.body.status.conditions[0].status == "True"}
+          - condition: '${training_status_response.body.status.conditions[0].status == "True"}'
             next: trigger_evaluation
         next: training_failed
 
@@ -46,12 +46,12 @@ main:
         next: poll_training
 
     - training_failed:
-        raise: ${"Training job failed: " + training_execution_name}
+        raise: '${"Training job failed: " + training_execution_name}'
 
     - trigger_evaluation:
         call: http.post
         args:
-          url: ${"https://" + location + "-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/" + project_id + "/jobs/" + eval_job_name + ":run"}
+          url: '${"https://" + location + "-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/" + project_id + "/jobs/" + eval_job_name + ":run"}'
           auth:
             type: OAuth2
         result: eval_trigger_response
@@ -59,13 +59,13 @@ main:
 
     - wait_for_evaluation:
         assign:
-          - eval_execution_name: ${eval_trigger_response.body.metadata.name}
+          - eval_execution_name: '${eval_trigger_response.body.metadata.name}'
         next: poll_evaluation
 
     - poll_evaluation:
         call: http.get
         args:
-          url: ${"https://" + location + "-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/" + project_id + "/executions/" + eval_execution_name}
+          url: '${"https://" + location + "-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/" + project_id + "/executions/" + eval_execution_name}'
           auth:
             type: OAuth2
         result: eval_status_response
@@ -73,9 +73,9 @@ main:
 
     - check_eval_status:
         switch:
-          - condition: ${not("completionTime" in eval_status_response.body.status)}
+          - condition: '${not("completionTime" in eval_status_response.body.status)}'
             next: sleep_evaluation
-          - condition: ${eval_status_response.body.status.conditions[0].status == "True"}
+          - condition: '${eval_status_response.body.status.conditions[0].status == "True"}'
             next: trigger_reporting
         next: eval_failed
 
@@ -86,12 +86,12 @@ main:
         next: poll_evaluation
 
     - eval_failed:
-        raise: ${"Evaluation job failed: " + eval_execution_name}
+        raise: '${"Evaluation job failed: " + eval_execution_name}'
 
     - trigger_reporting:
         call: http.post
         args:
-          url: ${"https://" + location + "-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/" + project_id + "/jobs/" + report_job_name + ":run"}
+          url: '${"https://" + location + "-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/" + project_id + "/jobs/" + report_job_name + ":run"}'
           auth:
             type: OAuth2
         result: report_trigger_response
