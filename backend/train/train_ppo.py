@@ -69,7 +69,7 @@ def train():
     parser.add_argument("--total-timesteps", type=int, default=TOTAL_TIMESTEPS)
     parser.add_argument("--timestamp", type=str, default=None)
     parser.add_argument("--symbols", type=str, default=None, help="Comma separated symbols or None for config default")
-    parser.add_argument("--num-envs", type=int, default=1, help="Number of parallel environments (1 is recommended for vectorized envs on Windows)")
+    parser.add_argument("--num-envs", type=int, default=8, help="Number of parallel environments")
     parser.add_argument("--force-fresh", action="store_true", help="Force training from scratch even if latest model exists")
     args = parser.parse_args()
 
