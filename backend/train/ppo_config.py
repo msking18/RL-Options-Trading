@@ -34,6 +34,9 @@ COMMISSION_TIER_DEFAULT = 0.5    # 10+ steps → 0.5× commission
 VOL_SCALE_HIGH_THRESHOLD = 0.40   # Above this vol → 50% size
 VOL_SCALE_MED_THRESHOLD = 0.25    # Above this vol → 75% size
 
+# --- Minimum Hold Period ---
+MIN_HOLD_STEPS = 3               # Positions must be held this many steps before exit is allowed
+
 USE_CNN = True         # Toggle for 1D-CNN vs MlpPolicy
 
 # --- Symbol Configuration ---

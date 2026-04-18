@@ -10,7 +10,8 @@ from data.preprocessing.greeks import calculate_black_scholes_greeks, calculate_
 from backend.db.local_db_manager import LocalDBManager
 from backend.train.ppo_config import (
     INITIAL_CAPITAL, PATIENCE_BONUS, DRAWDOWN_THRESHOLD,
-    DRAWDOWN_PENALTY_SCALE, VOL_SCALE_HIGH_THRESHOLD, VOL_SCALE_MED_THRESHOLD
+    DRAWDOWN_PENALTY_SCALE, VOL_SCALE_HIGH_THRESHOLD, VOL_SCALE_MED_THRESHOLD,
+    MIN_HOLD_STEPS
 )
 
 class TradingEnv(gym.Env):
@@ -492,13 +493,16 @@ class TradingEnv(gym.Env):
         m[active_indices[flat], 1] = True
         m[active_indices[flat], 2] = True
         
-        # Long Call (type 1)
+        # Long Call (type 1) — only allow exit if held long enough
+        hold_durs = self.state_manager.pos_hold_dur[active_sym_idxs]
         calls = (pos_types == 1)
-        m[active_indices[calls], 3] = True
+        calls_can_exit = calls & (hold_durs >= MIN_HOLD_STEPS)
+        m[active_indices[calls_can_exit], 3] = True
         
-        # Long Put (type 2)
+        # Long Put (type 2) — only allow exit if held long enough
         puts = (pos_types == 2)
-        m[active_indices[puts], 4] = True
+        puts_can_exit = puts & (hold_durs >= MIN_HOLD_STEPS)
+        m[active_indices[puts_can_exit], 4] = True
         
         # Inactive slots already handled (only Hold is True)
 
