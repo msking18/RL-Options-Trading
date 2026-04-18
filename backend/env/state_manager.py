@@ -84,6 +84,7 @@ class TradingStateManager:
         self.total_pnl += realized_pnl
         
         # Log trade (maintained for post-run analysis)
+        entry_val = float(self.pos_entry_price[idx] * quantity)
         self.trade_logs.append({
             'symbol': symbol,
             'type': self.INV_TYPE_MAP[self.pos_type[idx]],
@@ -93,7 +94,8 @@ class TradingStateManager:
             'hold_duration': int(self.pos_hold_dur[idx]),
             'entry_price': float(self.pos_entry_price[idx]),
             'exit_price': float(execution_price),
-            'pnl': float(realized_pnl)
+            'pnl': float(realized_pnl),
+            'pnl_pct': float(realized_pnl / entry_val) if entry_val > 0 else 0.0
         })
         
         # Reset symbol state

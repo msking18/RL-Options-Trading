@@ -102,16 +102,19 @@ def generate_excel_report(pkl_path, output_path):
     log_row = 1
     for res in all_results:
         for log in res.get('trade_logs', []):
-            log_sheet.write(log_row, 0, res['name'])
-            log_sheet.write(log_row, 1, log['symbol'])
-            log_sheet.write(log_row, 2, log['type'])
-            log_sheet.write(log_row, 3, log['entry_time'])
-            log_sheet.write(log_row, 4, log['exit_time'])
-            log_sheet.write(log_row, 5, log['entry_price'], metric_format)
-            log_sheet.write(log_row, 6, log['exit_price'], metric_format)
-            log_sheet.write(log_row, 7, log['pnl'], metric_format)
-            log_sheet.write(log_row, 8, log['pnl_pct'], pct_format)
-            log_row += 1
+            try:
+                log_sheet.write(log_row, 0, res['name'])
+                log_sheet.write(log_row, 1, log.get('symbol', 'N/A'))
+                log_sheet.write(log_row, 2, log.get('type', 'N/A'))
+                log_sheet.write(log_row, 3, log.get('entry_time', 0))
+                log_sheet.write(log_row, 4, log.get('exit_time', 0))
+                log_sheet.write(log_row, 5, log.get('entry_price', 0), metric_format)
+                log_sheet.write(log_row, 6, log.get('exit_price', 0), metric_format)
+                log_sheet.write(log_row, 7, log.get('pnl', 0), metric_format)
+                log_sheet.write(log_row, 8, log.get('pnl_pct', 0), pct_format)
+                log_row += 1
+            except Exception as e:
+                print(f"Warning: Skipping trade log entry due to error: {e}")
 
     # 3. Equity Curves & Drawdowns Sheet
     curve_sheet = workbook.add_worksheet("Curves Data")
@@ -185,7 +188,7 @@ def generate_excel_report(pkl_path, output_path):
         trades = res.get('trade_logs', [])
         if not trades: continue
         
-        pnls = [t['pnl_pct'] for t in trades]
+        pnls = [t.get('pnl_pct', 0.0) for t in trades]
         dist_sheet.write(dist_row, 0, f"PnL Stats: {res['name']}", header_format)
         stats = pd.Series(pnls).describe()
         for i, (idx, val) in enumerate(stats.items()):
