@@ -14,6 +14,26 @@ MIN_SYMBOLS = 5
 MAX_SYMBOLS = 10
 TOTAL_SLOTS = 10
 FIXED_COMMISSION = 20.0 # Per order side (Upstox)
+
+# --- Reward Tuning ---
+PATIENCE_BONUS = 0.0001          # Per-step bonus for holding flat (no position, chose Hold)
+DRAWDOWN_THRESHOLD = 0.05        # Trailing DD penalty kicks in at 5%
+DRAWDOWN_PENALTY_SCALE = 5.0     # Multiplier for DD penalty severity
+
+# Graduated commission tiers: {max_hold_duration: multiplier}
+# Scalps (1 step) pay 3× base, long holds (10+) pay 0.5× base
+COMMISSION_TIERS = [
+    (1, 3.0),    # 1 step  → 3× commission
+    (2, 2.0),    # 2 steps → 2× commission
+    (4, 1.5),    # 3-4 steps → 1.5× commission
+    (9, 1.0),    # 5-9 steps → 1× commission (base)
+]
+COMMISSION_TIER_DEFAULT = 0.5    # 10+ steps → 0.5× commission
+
+# --- Volatility Position Sizing ---
+VOL_SCALE_HIGH_THRESHOLD = 0.40   # Above this vol → 50% size
+VOL_SCALE_MED_THRESHOLD = 0.25    # Above this vol → 75% size
+
 USE_CNN = True         # Toggle for 1D-CNN vs MlpPolicy
 
 # --- Symbol Configuration ---

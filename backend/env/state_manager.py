@@ -1,5 +1,6 @@
 import numpy as np
 from typing import Dict, Optional, List
+from backend.train.ppo_config import COMMISSION_TIERS, COMMISSION_TIER_DEFAULT
 
 class TradingStateManager:
     """
@@ -70,6 +71,13 @@ class TradingStateManager:
         self.cash_balance -= total_cost
         return True
 
+    def _get_exit_commission(self, hold_duration: int) -> float:
+        """Graduated commission: penalize short holds (scalps), reward patience."""
+        for max_dur, multiplier in COMMISSION_TIERS:
+            if hold_duration <= max_dur:
+                return self.fixed_commission * multiplier
+        return self.fixed_commission * COMMISSION_TIER_DEFAULT
+
     def exit_position(self, symbol: str, current_option_price: float):
         idx = self.symbol_to_idx.get(symbol)
         if idx is None or self.pos_type[idx] == self.TYPE_NONE:
@@ -78,9 +86,13 @@ class TradingStateManager:
         quantity = self.pos_qty[idx]
         execution_price = current_option_price * (1 - self.slippage_pct)
         
-        realized_pnl = (execution_price * quantity - self.fixed_commission) - (self.pos_entry_price[idx] * quantity + self.fixed_commission)
+        # Graduated commission: scalps pay more, patient holds pay less
+        exit_commission = self._get_exit_commission(int(self.pos_hold_dur[idx]))
+        entry_commission = self.fixed_commission  # Entry always pays base rate
         
-        self.cash_balance += (execution_price * quantity) - self.fixed_commission
+        realized_pnl = (execution_price * quantity - exit_commission) - (self.pos_entry_price[idx] * quantity + entry_commission)
+        
+        self.cash_balance += (execution_price * quantity) - exit_commission
         self.total_pnl += realized_pnl
         
         # Log trade (maintained for post-run analysis)

@@ -8,7 +8,10 @@ from backend.env.state_manager import TradingStateManager
 from data.pipelines.db_manager import HistoricalDBManager
 from data.preprocessing.greeks import calculate_black_scholes_greeks, calculate_black_scholes_price
 from backend.db.local_db_manager import LocalDBManager
-from backend.train.ppo_config import INITIAL_CAPITAL
+from backend.train.ppo_config import (
+    INITIAL_CAPITAL, PATIENCE_BONUS, DRAWDOWN_THRESHOLD,
+    DRAWDOWN_PENALTY_SCALE, VOL_SCALE_HIGH_THRESHOLD, VOL_SCALE_MED_THRESHOLD
+)
 
 class TradingEnv(gym.Env):
     """
@@ -555,16 +558,28 @@ class TradingEnv(gym.Env):
             buy_puts = (active_actions == 2) & (self.state_manager.pos_type[active_sym_idxs] == 0)
             for i in np.where(buy_calls | buy_puts)[0]:
                 sym = self.slot_to_symbol[active_indices[i]]
+                base_lot_size = getattr(self, 'lot_size_map', {}).get(sym, 50)
+                
+                # Volatility-conditional position sizing
+                sym_vol = curr_data[i, self.idx_vol]  # Annualized vol
+                if sym_vol > VOL_SCALE_HIGH_THRESHOLD:
+                    vol_scale = 0.5    # High vol → half size
+                elif sym_vol > VOL_SCALE_MED_THRESHOLD:
+                    vol_scale = 0.75   # Medium vol → 3/4 size
+                else:
+                    vol_scale = 1.0    # Low vol → full size
+                lot_size = max(1, int(base_lot_size * vol_scale))
+                
                 self.state_manager.enter_position(sym, 'LONG_CALL' if buy_calls[i] else 'LONG_PUT',
                                                curr_data[i, self.idx_call] if buy_calls[i] else curr_data[i, self.idx_put],
                                                curr_data[i, self.idx_close],
-                                               quantity=getattr(self, 'lot_size_map', {}).get(sym, 50))
+                                               quantity=lot_size)
 
         # 2. Transition
         self.current_step += 1
         done = (self.current_step >= self.max_steps)
         
-        # 3. Vectorized Position Updates & Penalties
+        # 3. Vectorized Position Updates & Drawdown Penalty (NO per-step holding cost)
         act_mask = (self.state_manager.pos_type > 0)
         total_penalty = 0.0
         if np.any(act_mask):
@@ -583,21 +598,28 @@ class TradingEnv(gym.Env):
             self.state_manager.pos_peak_pnl[a_idx] = np.maximum(self.state_manager.pos_peak_pnl[a_idx], pnl_pcts)
             self.state_manager.pos_hold_dur[a_idx] += 1
             
-            # Vectorized Penalties
-            h_dur = self.state_manager.pos_hold_dur[a_idx]
+            # Drawdown penalty ONLY (no per-step holding cost)
             pk = self.state_manager.pos_peak_pnl[a_idx]
-            total_penalty = np.sum((h_dur / 78.0)**1.5 * 0.02 + (pk - pnl_pcts) * 0.2)
-            
-            # Drawdown logic
             dd = pk - pnl_pcts
-            total_penalty += np.sum(np.where(dd > 0.05, 5.0 * ((dd - 0.05) * 100.0), 0.0))
+            total_penalty = np.sum(np.where(
+                dd > DRAWDOWN_THRESHOLD, 
+                DRAWDOWN_PENALTY_SCALE * ((dd - DRAWDOWN_THRESHOLD) * 100.0), 
+                0.0
+            ))
 
         self.state_manager._update_total_capital()
         new_capital = self.state_manager.total_capital
         
-        # 4. Reward Logic (Simplified but powerful)
+        # 4. Reward Logic
         reward = (new_capital - prev_capital) / self.initial_capital
         reward -= total_penalty
+        
+        # Patience bonus: reward flat holds (active slot, no position, chose Hold)
+        if len(active_indices) > 0:
+            flat_holds = np.sum(
+                (active_actions == 0) & (self.state_manager.pos_type[active_sym_idxs] == 0)
+            )
+            reward += flat_holds * PATIENCE_BONUS
         
         # Death Penalty
         if new_capital < (self.initial_capital * 0.3):

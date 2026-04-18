@@ -14,6 +14,7 @@ ppo_trading_tensorboard/
 #Project Specific
 Material/
 bench_vectorized.py
+reports/
 
 # GCP Setup
 deploy.ps1
