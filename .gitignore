@@ -14,8 +14,6 @@ backend/scratch/
 tests/
 
 # Data & Models
-data/*.db
-data/historical/*.parquet
 backend/models/*.zip
 backend/models/*.pkl
 

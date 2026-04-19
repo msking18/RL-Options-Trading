@@ -91,8 +91,18 @@ class TradingEnv(gym.Env):
                     df = self._precalculate_data(df, sym)
                     self.all_dfs[sym] = df
 
-            print("Finalizing NumPy data tensors...")
             self.symbol_list = list(self.all_dfs.keys()) # Stable order
+            
+            # Validation: Ensure we have enough symbols
+            num_loaded = len(self.symbol_list)
+            if num_loaded < self.min_active_symbols:
+                raise ValueError(f"Insufficient data: Only {num_loaded} symbols loaded, but MIN_SYMBOLS is {self.min_active_symbols}. "
+                                 f"Check the 'No data found' warnings above for details.")
+            
+            if num_loaded < self.total_slots:
+                print(f"Warning: Only {num_loaded} symbols loaded, which is fewer than {self.total_slots} slots. "
+                      "Model efficiency may be reduced.")
+
             self.symbol_to_idx = {sym: i for i, sym in enumerate(self.symbol_list)}
             
             # Determine all columns to be included in the tensor

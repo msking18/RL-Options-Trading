@@ -34,7 +34,11 @@ class HistoricalDBManager:
     def load_data(self, symbol: str, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None) -> pd.DataFrame:
         """Load data from the local database."""
         file_path = self.get_file_path(symbol)
+        abs_path = os.path.abspath(file_path)
+        
         if not os.path.exists(file_path):
+            import logging
+            logging.warning(f"File not found for {symbol}: {abs_path} (CWD: {os.getcwd()})")
             return pd.DataFrame()
         
         df = pd.read_parquet(file_path)
