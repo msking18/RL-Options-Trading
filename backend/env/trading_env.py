@@ -141,6 +141,7 @@ class TradingEnv(gym.Env):
         self.idx_ema200 = self.col_to_idx['EMA_200']
         self.idx_call = self.col_to_idx['atm_call_price']
         self.idx_put = self.col_to_idx['atm_put_price']
+        self.idx_ext_start = self.col_to_idx[self.external_features_cols[0]]
         self.idx_max_impact = self.col_to_idx['Max_Impact']
         self.idx_pos_score = self.col_to_idx['Pos_Score_Lag1']
         self.idx_neg_score = self.col_to_idx['Neg_Score_Lag1']
