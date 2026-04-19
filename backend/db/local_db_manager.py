@@ -273,6 +273,10 @@ class LocalDBManager:
             # Use individual inserts with OR IGNORE to respect the UNIQUE index on (timestamp, event_name)
             for _, row in subset.iterrows():
                 row_dict = row.to_dict()
+                # Ensure timestamp is string for SQLite
+                if 'timestamp' in row_dict and hasattr(row_dict['timestamp'], 'isoformat'):
+                    row_dict['timestamp'] = row_dict['timestamp'].strftime('%Y-%m-%d %H:%M:%S')
+                
                 columns = ', '.join(row_dict.keys())
                 placeholders = ', '.join(['?'] * len(row_dict))
                 sql = f"INSERT OR IGNORE INTO economic_events ({columns}) VALUES ({placeholders})"

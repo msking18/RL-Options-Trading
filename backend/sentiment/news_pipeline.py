@@ -147,6 +147,6 @@ class NewsSentimentPipeline:
 
 if __name__ == "__main__":
     pipeline = NewsSentimentPipeline()
-    # Initial sync for 1 year
-    pipeline.sync_history(lookback_days=365)
+    # Initial sync for ~2.2 years
+    pipeline.sync_history(lookback_days=800)
     pipeline.close()

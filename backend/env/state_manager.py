@@ -78,7 +78,7 @@ class TradingStateManager:
                 return self.fixed_commission * multiplier
         return self.fixed_commission * COMMISSION_TIER_DEFAULT
 
-    def exit_position(self, symbol: str, current_option_price: float):
+    def exit_position(self, symbol: str, current_option_price: float, extra_info: dict = None):
         idx = self.symbol_to_idx.get(symbol)
         if idx is None or self.pos_type[idx] == self.TYPE_NONE:
             return 0.0
@@ -97,7 +97,7 @@ class TradingStateManager:
         
         # Log trade (maintained for post-run analysis)
         entry_val = float(self.pos_entry_price[idx] * quantity)
-        self.trade_logs.append({
+        log_entry = {
             'symbol': symbol,
             'type': self.INV_TYPE_MAP[self.pos_type[idx]],
             'quantity': int(quantity),
@@ -107,8 +107,15 @@ class TradingStateManager:
             'entry_price': float(self.pos_entry_price[idx]),
             'exit_price': float(execution_price),
             'pnl': float(realized_pnl),
-            'pnl_pct': float(realized_pnl / entry_val) if entry_val > 0 else 0.0
-        })
+            'pnl_pct': float(realized_pnl / entry_val) if entry_val > 0 else 0.0,
+            'commission_exit': float(exit_commission)
+        }
+        
+        # Merge extra info (Context like sentiment/macro)
+        if extra_info:
+            log_entry.update(extra_info)
+            
+        self.trade_logs.append(log_entry)
         
         # Reset symbol state
         self.pos_type[idx] = self.TYPE_NONE

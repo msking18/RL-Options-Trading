@@ -9,7 +9,7 @@ from stable_baselines3.common.callbacks import BaseCallback
 from backend.train.ppo_config import (
     get_ppo_params, TRAINING_SYMBOLS, MODEL_DIR, LOG_DIR, 
     TOTAL_TIMESTEPS, MIN_SYMBOLS, MAX_SYMBOLS, TOTAL_SLOTS, INITIAL_CAPITAL,
-    FIXED_COMMISSION
+    FIXED_COMMISSION, TRAIN_START_DATE, TRAIN_END_DATE
 )
 from backend.env.trading_env import TradingEnv
 
@@ -43,7 +43,7 @@ class HyperparameterAnnealingCallback(BaseCallback):
 def mask_fn(env):
     return env.action_masks()
 
-def make_env(symbols, lookback_window, initial_capital, slippage, rank, seed=0, preloaded_data=None, min_symbols=5, max_symbols=10, total_slots=10, fixed_commission=0.0, preloaded_tensor=None, col_to_idx=None):
+def make_env(symbols, lookback_window, initial_capital, slippage, rank, seed=0, preloaded_data=None, min_symbols=5, max_symbols=10, total_slots=10, fixed_commission=0.0, preloaded_tensor=None, col_to_idx=None, start_date=None, end_date=None):
     """
     Utility function for multiprocessed env.
     """
@@ -59,7 +59,9 @@ def make_env(symbols, lookback_window, initial_capital, slippage, rank, seed=0, 
             total_slots=total_slots,
             fixed_commission=fixed_commission,
             preloaded_tensor=preloaded_tensor,
-            col_to_idx=col_to_idx
+            col_to_idx=col_to_idx,
+            start_date=start_date,
+            end_date=end_date
         )
         return ActionMasker(env, mask_fn)
     return _init
@@ -86,8 +88,8 @@ def train():
     print(f"Initializing {args.num_envs} Vectorized Environments with symbols: {symbols}")
     
     # Pre-load data once for all workers
-    print("\n--- Pre-loading Data for Training Workers ---")
-    temp_env = TradingEnv(symbols=symbols)
+    print(f"\n--- Pre-loading Data for Training Workers ({TRAIN_START_DATE} to {TRAIN_END_DATE}) ---")
+    temp_env = TradingEnv(symbols=symbols, start_date=TRAIN_START_DATE, end_date=TRAIN_END_DATE)
     preloaded_data = temp_env.all_dfs
     
     # Determine vectorized environment type
@@ -95,7 +97,10 @@ def train():
         # For multiple environments, use SubprocVecEnv with 'fork' for Linux speed 
         # (or 'spawn' if 'fork' has issues, but 'fork' is standard in Docker)
         try:
-            multiprocessing.set_start_method('fork', force=True)
+            # Use 'spawn' for Windows compatibility
+            import platform
+            method = 'fork' if platform.system() != 'Windows' else 'spawn'
+            multiprocessing.set_start_method(method, force=True)
         except RuntimeError:
             pass
         
@@ -114,7 +119,9 @@ def train():
             min_symbols=MIN_SYMBOLS,
             max_symbols=MAX_SYMBOLS,
             total_slots=TOTAL_SLOTS,
-            fixed_commission=FIXED_COMMISSION
+            fixed_commission=FIXED_COMMISSION,
+            start_date=TRAIN_START_DATE,
+            end_date=TRAIN_END_DATE
         ) 
         for i in range(args.num_envs)
     ])

@@ -77,4 +77,5 @@ class MacroDataPipeline:
 
 if __name__ == "__main__":
     pipeline = MacroDataPipeline()
-    pipeline.sync_data(period="1y")
+    # Full historical sync (3 years to cover 2.2y expansion)
+    pipeline.sync_data(period="3y")

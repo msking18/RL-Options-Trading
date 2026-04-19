@@ -61,19 +61,35 @@ class UpstoxDataPipeline:
         current_to = end_date
         total_fetched = 0
         
-        # Check if we already have some data
-        last_recorded = self.db_manager.get_last_timestamp(symbol_display)
-        if last_recorded:
-            fetch_from = max(start_date, last_recorded + timedelta(minutes=5))
-            if fetch_from >= end_date:
-                print(f"Data for {symbol_display} is already up to date.", flush=True)
-                return
-            print(f"Resuming sync from {fetch_from.strftime('%Y-%m-%d')}", flush=True)
-        else:
-            print(f"Starting full sync from {fetch_from.strftime('%Y-%m-%d')}", flush=True)
+        # Check current coverage
+        first_recorded = None
+        last_recorded = None
+        file_path = self.db_manager.get_file_path(symbol_display)
+        if os.path.exists(file_path):
+            existing_df = pd.read_parquet(file_path)
+            if not existing_df.empty:
+                existing_df['time'] = pd.to_datetime(existing_df['time'])
+                first_recorded = existing_df['time'].min()
+                last_recorded = existing_df['time'].max()
 
-        # Chunking in 30-day blocks for V3
-        chunk_size = timedelta(days=30)
+        # If lookback was increased (start_date < first_recorded), we must fetch the history gap.
+        # If we need new data (end_date > last_recorded), we must fetch the future gap.
+        if last_recorded and first_recorded:
+            if start_date >= first_recorded and end_date <= last_recorded:
+                print(f"Data for {symbol_display} is already up to date ({first_recorded.date()} to {last_recorded.date()}).", flush=True)
+                return
+            
+            if end_date > last_recorded:
+                print(f"Resuming sync for future data from {last_recorded.strftime('%Y-%m-%d')}", flush=True)
+                # fetch_from is already start_date, and current_to is already end_date. 
+                # The while loop will go from now down to April 2024, and save_data handles duplicates.
+            elif start_date < first_recorded:
+                print(f"Backfilling historical data from {start_date.strftime('%Y-%m-%d')} to {first_recorded.strftime('%Y-%m-%d')}", flush=True)
+        else:
+            print(f"Starting full sync from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}", flush=True)
+
+        # Chunking in 10-day blocks for V3 stability
+        chunk_size = timedelta(days=10)
         while current_to > fetch_from:
             current_chunk_from = max(fetch_from, current_to - chunk_size)
             print(f"[{symbol_display}] Fetching {current_chunk_from.strftime('%Y-%m-%d')} to {current_to.strftime('%Y-%m-%d')}...", flush=True)
@@ -124,10 +140,21 @@ class UpstoxDataPipeline:
             "Nifty 500": "NSE_INDEX|Nifty 500",
             "Nifty IT": "NSE_INDEX|Nifty IT",
             "Nifty Auto": "NSE_INDEX|Nifty Auto",
-            "Nifty Pharma": "NSE_INDEX|Nifty Pharma"
+            "Nifty Pharma": "NSE_INDEX|Nifty Pharma",
+            "Nifty Metal": "NSE_INDEX|Nifty Metal",
+            "Nifty Energy": "NSE_INDEX|Nifty Energy",
+            "Nifty Realty": "NSE_INDEX|Nifty Realty",
+            "Nifty FMCG": "NSE_INDEX|Nifty FMCG",
+            "Nifty Infra": "NSE_INDEX|Nifty Infra"
         }
 
-        # 2. Try to upgrade to Futures for eligible indices
+        # 2. Try to upgrade to Futures for eligible indices (ONLY for short lookbacks)
+        # Futures contracts expire and don't have multi-year history under a single key.
+        # For long backfills, we MUST use Spot indices.
+        if hasattr(self, '_current_lookback') and self._current_lookback > 0.5:
+            print("Long lookback detected: Using Spot Index keys for maximum historical coverage.", flush=True)
+            return final_keys
+
         futures_search = {
             "Nifty 50": "NIFTY",
             "Nifty Bank": "BANKNIFTY",
@@ -168,8 +195,9 @@ class UpstoxDataPipeline:
 
         return final_keys
 
-    def sync_all_indices(self):
-        """Sync the top 10 indices as per user preference."""
+    def sync_all_indices(self, lookback_years=1.5):
+        """Sync the top indices as per user preference."""
+        self._current_lookback = lookback_years
         indices = self.resolve_instrument_keys()
         if not indices:
             print("Error: Could not resolve keys. Aborting sync.")
@@ -178,10 +206,11 @@ class UpstoxDataPipeline:
         for name, key in indices.items():
             try:
                 # For historical sync, we usually want at least 1 year
-                self.sync_index(key, name, lookback_years=1.5)
+                self.sync_index(key, name, lookback_years=lookback_years)
             except Exception as e:
                 print(f"Failed to sync {name}: {e}")
 
 if __name__ == "__main__":
+    # Full historical sync for indices (2.2 years back to April 2024)
     pipeline = UpstoxDataPipeline()
-    pipeline.sync_all_indices()
+    pipeline.sync_all_indices(lookback_years=2.2)

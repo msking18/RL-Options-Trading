@@ -10,8 +10,7 @@ from data.preprocessing.greeks import calculate_black_scholes_greeks, calculate_
 from backend.db.local_db_manager import LocalDBManager
 from backend.train.ppo_config import (
     INITIAL_CAPITAL, PATIENCE_BONUS, DRAWDOWN_THRESHOLD,
-    DRAWDOWN_PENALTY_SCALE, VOL_SCALE_HIGH_THRESHOLD, VOL_SCALE_MED_THRESHOLD,
-    MIN_HOLD_STEPS
+    DRAWDOWN_PENALTY_SCALE, VOL_SCALE_HIGH_THRESHOLD, VOL_SCALE_MED_THRESHOLD
 )
 
 class TradingEnv(gym.Env):
@@ -142,8 +141,9 @@ class TradingEnv(gym.Env):
         self.idx_ema200 = self.col_to_idx['EMA_200']
         self.idx_call = self.col_to_idx['atm_call_price']
         self.idx_put = self.col_to_idx['atm_put_price']
-        self.idx_ext_start = self.col_to_idx[self.external_features_cols[0]]
         self.idx_max_impact = self.col_to_idx['Max_Impact']
+        self.idx_pos_score = self.col_to_idx['Pos_Score_Lag1']
+        self.idx_neg_score = self.col_to_idx['Neg_Score_Lag1']
 
         # Pre-allocate Observation Buffer (NumPy array)
         self.per_symbol_segment_size = (self.lookback_window * 6) + (5 * 4) + 3 + 5
@@ -191,7 +191,12 @@ class TradingEnv(gym.Env):
             "Nifty 500": 25,
             "Nifty IT": 50,
             "Nifty Auto": 50,
-            "Nifty Pharma": 50
+            "Nifty Pharma": 50,
+            "Nifty Metal": 25,
+            "Nifty Energy": 25,
+            "Nifty Realty": 50,
+            "Nifty FMCG": 25,
+            "Nifty Infra": 75
         }
 
     def _merge_external_signals(self, df, symbol):
@@ -493,16 +498,13 @@ class TradingEnv(gym.Env):
         m[active_indices[flat], 1] = True
         m[active_indices[flat], 2] = True
         
-        # Long Call (type 1) — only allow exit if held long enough
-        hold_durs = self.state_manager.pos_hold_dur[active_sym_idxs]
+        # Long Call (type 1) — only allow exit if active
         calls = (pos_types == 1)
-        calls_can_exit = calls & (hold_durs >= MIN_HOLD_STEPS)
-        m[active_indices[calls_can_exit], 3] = True
+        m[active_indices[calls], 3] = True
         
-        # Long Put (type 2) — only allow exit if held long enough
+        # Long Put (type 2) — only allow exit if active
         puts = (pos_types == 2)
-        puts_can_exit = puts & (hold_durs >= MIN_HOLD_STEPS)
-        m[active_indices[puts_can_exit], 4] = True
+        m[active_indices[puts], 4] = True
         
         # Inactive slots already handled (only Hold is True)
 
@@ -553,9 +555,20 @@ class TradingEnv(gym.Env):
             # Exits
             ext_calls = (active_actions == 3) & (self.state_manager.pos_type[active_sym_idxs] == 1)
             ext_puts = (active_actions == 4) & (self.state_manager.pos_type[active_sym_idxs] == 2)
+            
+            # Common external context for all trade exits at this step
+            # Use data from the first active symbol (all symbols share the same daily external features)
+            first_idx = active_sym_idxs[0]
+            extra_info = {
+                'sentiment_pos': float(self.data_tensor[first_idx, self.current_step, self.idx_pos_score]),
+                'sentiment_neg': float(self.data_tensor[first_idx, self.current_step, self.idx_neg_score]),
+                'max_impact': int(self.data_tensor[first_idx, self.current_step, self.idx_max_impact])
+            }
+            
             for i in np.where(ext_calls | ext_puts)[0]:
                 self.state_manager.exit_position(self.slot_to_symbol[active_indices[i]], 
-                                              curr_data[i, self.idx_call] if ext_calls[i] else curr_data[i, self.idx_put])
+                                              curr_data[i, self.idx_call] if ext_calls[i] else curr_data[i, self.idx_put],
+                                              extra_info=extra_info)
             
             # Enters
             buy_calls = (active_actions == 1) & (self.state_manager.pos_type[active_sym_idxs] == 0)

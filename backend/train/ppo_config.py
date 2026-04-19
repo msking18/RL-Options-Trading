@@ -21,11 +21,11 @@ DRAWDOWN_THRESHOLD = 0.05        # Trailing DD penalty kicks in at 5%
 DRAWDOWN_PENALTY_SCALE = 5.0     # Multiplier for DD penalty severity
 
 # Graduated commission tiers: {max_hold_duration: multiplier}
-# Scalps (1 step) pay 3× base, long holds (10+) pay 0.5× base
+# Scalps (1 step) pay 5× base, long holds (10+) pay 0.5× base
 COMMISSION_TIERS = [
-    (1, 3.0),    # 1 step  → 3× commission
-    (2, 2.0),    # 2 steps → 2× commission
-    (4, 1.5),    # 3-4 steps → 1.5× commission
+    (1, 5.0),    # 1 step   → 5× commission (Emergency exit tax)
+    (2, 3.0),    # 2 steps  → 3× commission
+    (4, 2.0),    # 3-4 steps → 2× commission
     (9, 1.0),    # 5-9 steps → 1× commission (base)
 ]
 COMMISSION_TIER_DEFAULT = 0.5    # 10+ steps → 0.5× commission
@@ -39,18 +39,23 @@ MIN_HOLD_STEPS = 3               # Positions must be held this many steps before
 
 USE_CNN = True         # Toggle for 1D-CNN vs MlpPolicy
 
+# --- Data Partitioning (2D Split) ---
+TRAIN_START_DATE = "2024-04-01"
+TRAIN_END_DATE   = "2025-09-30" # 18 months
+VAL_START_DATE   = "2025-10-01" # Start of 6-month True OoS
+VAL_END_DATE     = "2026-04-10"
+
 # --- Symbol Configuration ---
+# 12 symbols for training (10 base + 2 robustifiers)
 TRAINING_SYMBOLS = [
-    "Nifty 50", 
-    "Nifty Bank", 
-    "Nifty Fin Service",
-    "Nifty Midcap Select",
-    "Nifty Next 50",
-    "Nifty 100",
-    "Nifty 500",
-    "Nifty IT",
-    "Nifty Auto",
-    "Nifty Pharma"
+    "Nifty 50", "Nifty Bank", "Nifty Fin Service", "Nifty Midcap Select", "Nifty Next 50",
+    "Nifty 100", "Nifty 500", "Nifty IT", "Nifty Auto", "Nifty Pharma",
+    "Nifty Metal", "Nifty Energy"
+]
+
+# 3 symbols strictly reserved for evaluation (Zero-Shot Generalization)
+ZERO_SHOT_SYMBOLS = [
+    "Nifty Realty", "Nifty FMCG", "Nifty Infra"
 ]
 def load_best_params():
     """Loads tuned hyperparameters from JSON if available."""

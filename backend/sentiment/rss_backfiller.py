@@ -133,9 +133,9 @@ class RSSBackfiller:
         """)
         existing = set(row[0] for row in cursor.fetchall())
 
-        # Build full date range (1 year back)
+        # Build full date range (match the 2.2-year expansion: April 2024 - Now)
         end_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        start_date = end_date - timedelta(days=365)
+        start_date = end_date - timedelta(days=850) 
 
         missing = []
         current = start_date

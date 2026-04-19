@@ -95,7 +95,10 @@ def generate_excel_report(pkl_path, output_path):
     log_sheet.set_column('C:E', 12)
     log_sheet.set_column('F:I', 15)
     
-    log_headers = ['Regime', 'Symbol', 'Type', 'Entry Step', 'Exit Step', 'Entry Price', 'Exit Price', 'PnL', 'PnL %']
+    log_headers = [
+        'Regime', 'Symbol', 'Type', 'Entry Step', 'Exit Step', 'Hold Dur', 
+        'Entry Price', 'Exit Price', 'PnL', 'PnL %', 'Sent_Pos', 'Sent_Neg', 'Max_Impact', 'Exit Comm'
+    ]
     for c, h in enumerate(log_headers):
         log_sheet.write(0, c, h, header_format)
 
@@ -108,10 +111,15 @@ def generate_excel_report(pkl_path, output_path):
                 log_sheet.write(log_row, 2, log.get('type', 'N/A'))
                 log_sheet.write(log_row, 3, log.get('entry_time', 0))
                 log_sheet.write(log_row, 4, log.get('exit_time', 0))
-                log_sheet.write(log_row, 5, log.get('entry_price', 0), metric_format)
-                log_sheet.write(log_row, 6, log.get('exit_price', 0), metric_format)
-                log_sheet.write(log_row, 7, log.get('pnl', 0), metric_format)
-                log_sheet.write(log_row, 8, log.get('pnl_pct', 0), pct_format)
+                log_sheet.write(log_row, 5, log.get('hold_duration', 0))
+                log_sheet.write(log_row, 6, log.get('entry_price', 0), metric_format)
+                log_sheet.write(log_row, 7, log.get('exit_price', 0), metric_format)
+                log_sheet.write(log_row, 8, log.get('pnl', 0), metric_format)
+                log_sheet.write(log_row, 9, log.get('pnl_pct', 0), pct_format)
+                log_sheet.write(log_row, 10, log.get('sentiment_pos', 0), metric_format)
+                log_sheet.write(log_row, 11, log.get('sentiment_neg', 0), metric_format)
+                log_sheet.write(log_row, 12, log.get('max_impact', 0))
+                log_sheet.write(log_row, 13, log.get('commission_exit', 0), metric_format)
                 log_row += 1
             except Exception as e:
                 print(f"Warning: Skipping trade log entry due to error: {e}")

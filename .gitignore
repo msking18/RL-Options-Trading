@@ -1,17 +1,29 @@
 # Environments
 .env 
 
+# Python
+__pycache__/
+*.pyc
+
 # Gemini
 .agents/
 .ag-memory.json
+.gemini/
 scratch/
 backend/scratch/
 tests/
 
-#Logs
-ppo_trading_tensorboard/
+# Data & Models
+data/*.db
+data/historical/*.parquet
+backend/models/*.zip
+backend/models/*.pkl
 
-#Project Specific
+# Logs & Visualization
+ppo_trading_tensorboard/
+*.log
+
+# Project Specific
 Material/
 bench_vectorized.py
 reports/

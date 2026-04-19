@@ -13,9 +13,9 @@ from backend.train.metrics import (
     AlwaysATMStraddleBenchmark
 )
 from backend.train.ppo_config import (
-    MODEL_DIR, EVAL_DIR, TRAINING_SYMBOLS, get_ppo_params,
+    MODEL_DIR, EVAL_DIR, TRAINING_SYMBOLS, ZERO_SHOT_SYMBOLS, get_ppo_params,
     TOTAL_SLOTS, MIN_SYMBOLS, MAX_SYMBOLS, INITIAL_CAPITAL,
-    FIXED_COMMISSION
+    FIXED_COMMISSION, VAL_START_DATE, VAL_END_DATE
 )
 
 def get_raw_env(env):
@@ -241,26 +241,45 @@ def main():
     device = get_ppo_params().get('device', 'cpu')
     model = MaskablePPO.load(model_path, device=device)
     
-    regimes = [
-        {"name": "1 Week (High Vol)", "start": "2026-03-08", "end": "2026-03-15"},
-        {"name": "1 Month (Low Vol)", "start": "2025-09-01", "end": "2025-10-01"},
-        {"name": "6 Months (General OoS)", "start": "2025-10-01", "end": "2026-04-01"},
-        {"name": "1 Year (Full OoS)", "start": "2025-04-01", "end": "2026-04-01"}
+    # Define Evaluation Tracks
+    evaluation_tracks = [
+        {
+            "name": "Standard OoS (6-Month)", 
+            "symbols": TRAINING_SYMBOLS, 
+            "start": "2025-10-01", 
+            "end": "2026-04-10"
+        },
+        {
+            "name": "Low Volatility (1-Month)", 
+            "symbols": TRAINING_SYMBOLS, 
+            "start": "2026-01-01", 
+            "end": "2026-01-31"
+        },
+        {
+            "name": "High Volatility (1-Week)", 
+            "symbols": TRAINING_SYMBOLS, 
+            "start": "2026-04-03", 
+            "end": "2026-04-10"
+        },
+        {
+            "name": "Zero-Shot Transfer (Sector Change)", 
+            "symbols": ZERO_SHOT_SYMBOLS, 
+            "start": "2025-10-01", 
+            "end": "2026-04-10"
+        }
     ]
     
-    # Pre-loading and Caching
-    all_starts = [pd.to_datetime(r['start']) for r in regimes]
-    all_ends = [pd.to_datetime(r['end']) for r in regimes]
-    full_cache = preload_symbols_data(symbols_list, min(all_starts).strftime('%Y-%m-%d'), max(all_ends).strftime('%Y-%m-%d'))
-    
-    all_regime_results = []
-    for r in regimes:
+    all_track_results = []
+    for track in evaluation_tracks:
         try:
-            res = evaluate_regime(model, r['name'], symbols_list, r['start'], r['end'], 
-                                 preloaded_data=full_cache, stats_path=stats_path)
-            all_regime_results.append(res)
+            # Pre-load data for this specific track's symbols to save time/memory
+            track_cache = preload_symbols_data(track['symbols'], track['start'], track['end'])
+            
+            res = evaluate_regime(model, track['name'], track['symbols'], track['start'], track['end'], 
+                                 preloaded_data=track_cache, stats_path=stats_path)
+            all_track_results.append(res)
         except Exception as e:
-            print(f"Error evaluating regime {r['name']}: {e}")
+            print(f"Error evaluating track {track['name']}: {e}")
             import traceback
             traceback.print_exc()
         
@@ -269,11 +288,11 @@ def main():
     results_path = os.path.join(EVAL_DIR, results_filename)
     
     with open(results_path, "wb") as f:
-        pickle.dump(all_regime_results, f)
+        pickle.dump(all_track_results, f)
         
     latest_results_path = os.path.join(EVAL_DIR, "eval_latest.pkl")
     with open(latest_results_path, "wb") as f:
-        pickle.dump(all_regime_results, f)
+        pickle.dump(all_track_results, f)
         
     print(f"\nEvaluation complete. Results saved to {results_filename}")
 

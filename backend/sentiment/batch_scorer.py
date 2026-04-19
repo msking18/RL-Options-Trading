@@ -31,9 +31,10 @@ def run_batch_scoring():
 
     # Get initial stats
     stats = db.get_headline_stats()
-    logger.info(f"Starting batch scoring. {stats['unscored_headlines']} unscored headlines out of {stats['total_headlines']} total.")
+    unscored = stats["total_headlines"] - stats["scored_headlines"]
+    logger.info(f"Starting batch scoring. {unscored} unscored headlines out of {stats['total_headlines']} total.")
 
-    if stats["unscored_headlines"] == 0:
+    if unscored == 0:
         logger.info("All headlines are already scored. Nothing to do.")
         db.close()
         return
@@ -61,10 +62,11 @@ def run_batch_scoring():
 
     # Final stats
     final_stats = db.get_headline_stats()
+    final_unscored = final_stats["total_headlines"] - final_stats["scored_headlines"]
     logger.info(
         f"Batch scoring complete. "
         f"Total scored: {total_scored}. "
-        f"Remaining unscored: {final_stats['unscored_headlines']}."
+        f"Remaining unscored: {final_unscored}."
     )
 
     db.close()

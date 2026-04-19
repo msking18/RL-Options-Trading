@@ -5,6 +5,7 @@ import pandas as pd
 import os
 from datetime import datetime, timedelta
 import time
+import random
 from backend.db.local_db_manager import LocalDBManager
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -23,7 +24,9 @@ class EconomicEventManager:
         self.headers_list = [
             {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36', 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'text/html, */*; q=0.01', 'Referer': 'https://www.investing.com/economic-calendar/'},
             {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36', 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'text/html, */*; q=0.01', 'Referer': 'https://www.investing.com/economic-calendar/'},
-            {'User-Agent': 'Mozilla/5.0 (X11; Linux x87_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36', 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'text/html, */*; q=0.01', 'Referer': 'https://www.investing.com/economic-calendar/'}
+            {'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36', 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'text/html, */*; q=0.01', 'Referer': 'https://www.investing.com/economic-calendar/'},
+            {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0', 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'text/html, */*; q=0.01', 'Referer': 'https://www.investing.com/economic-calendar/'},
+            {'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1', 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'text/html, */*; q=0.01', 'Referer': 'https://www.investing.com/economic-calendar/'}
         ]
         self.headers = self.headers_list[0]
         
@@ -73,6 +76,16 @@ class EconomicEventManager:
                 'limit_from': 0,
             }
             
+            # Check if this month chunk already exists in DB (more than 5 events)
+            try:
+                existing = self.db.get_events_range(current_start.strftime('%Y-%m-%d'), current_end.strftime('%Y-%m-%d'))
+                if len(existing) > 5:
+                    logger.info(f"Chunk {current_start.date()} to {current_end.date()} already has {len(existing)} events. Skipping.")
+                    current_start = current_end + timedelta(days=1)
+                    continue
+            except Exception:
+                   pass
+            
             max_retries = 5
             retry_delay = 5
             success = False
@@ -108,8 +121,9 @@ class EconomicEventManager:
                 logger.error(f"Failed to fetch data for range {current_start.date()} to {current_end.date()} after {max_retries} attempts.")
             
             current_start = current_end + timedelta(days=1)
-            import random
-            time.sleep(random.uniform(5, 10)) # Increased randomized delay
+            sleep_time = random.uniform(10, 20) # Conservative randomized delay to avoid 429
+            logger.info(f"Sleeping for {sleep_time:.2f}s to avoid rate limiting...")
+            time.sleep(sleep_time) 
             self.headers = random.choice(self.headers_list) # Rotate UA
         
         return all_events
@@ -167,7 +181,7 @@ class EconomicEventManager:
         events = self.fetch_events(start_date, end_date)
         
         if not events:
-            logger.warning("No events were fetched. The API may be blocking requests.")
+            logger.warning("No events were fetched. The API may be blocking requests or all events are already present.")
             return
         
         df = pd.DataFrame(events)
