@@ -62,7 +62,7 @@ class TradingEnv(gym.Env):
             'CAC40_Ret_Lag1', 'FTSE100_Ret_Lag1', 'DAX_Ret_Lag1', 'SP500_Ret_Lag1',
             'HangSeng_Ret_Lag1', 'Nikkei225_Ret_Lag1', 'Nasdaq100_Ret_Lag1',
             'Pos_Score_Lag1', 'Neg_Score_Lag1', 'Headline_Count_Lag1',
-            'Max_Impact', 'Is_Event_Day'
+            'Max_Impact', 'Is_Event_Day', 'Vol_Percentile_252'
         ]
         
         # 4. Finalize Data (Vectorized 3D Tensor for Performance)
@@ -311,6 +311,12 @@ class TradingEnv(gym.Env):
         # Rolling Log Volatility (20-period EMA of returns)
         df['Index_Ret'] = np.log(df['close'] / df['close'].shift(1))
         df['Index_Vol'] = df['Index_Ret'].ewm(span=20).std() * np.sqrt(252 * 78) # Annualized
+        
+        # Volatility Percentile Proxy (Min-Max scaled over last 252 days)
+        # Using fast rolling min/max instead of expensive rolling rank
+        vol_min = df['Index_Vol'].rolling(window=19656, min_periods=100).min()
+        vol_max = df['Index_Vol'].rolling(window=19656, min_periods=100).max()
+        df['Vol_Percentile_252'] = (df['Index_Vol'] - vol_min) / (vol_max - vol_min + 1e-6)
         
         # EMA
         df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
