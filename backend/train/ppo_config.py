@@ -16,14 +16,16 @@ TOTAL_SLOTS = 12
 FIXED_COMMISSION = 20.0 # Per order side (Upstox)
 
 # --- Reward Tuning ---
-PATIENCE_BONUS = 0.00005         # Per-step bonus for holding flat (no position, chose Hold)
-DRAWDOWN_THRESHOLD = 0.15        # Trailing DD penalty kicks in at 15%
-DRAWDOWN_PENALTY_SCALE = 1.5     # Multiplier for DD penalty severity
+PATIENCE_BONUS = 0.0001         # Per-step bonus for holding flat (no position, chose Hold)
+DRAWDOWN_THRESHOLD_SOFT = 0.06   # Early warning DD penalty (6%)
+DRAWDOWN_THRESHOLD_HARD = 0.12   # Severe exit-forcing DD penalty (12%)
+SOFT_PENALTY_SCALE = 0.5         # Gentle slope for soft penalty
+HARD_PENALTY_SCALE = 2.0         # Sharp slope for hard penalty
 
 # Graduated commission tiers: {max_hold_duration: multiplier}
 # Scalps (1 step) pay 5× base, long holds (10+) pay 0.5× base
 COMMISSION_TIERS = [
-    (1, 2.5),    # 1 step   → 2.5× commission
+    (1, 3.5),    # 1 step   → 3.5× commission (Penalize scalps harder)
     (2, 1.5),    # 2 steps  → 1.5× commission
     (4, 1.0),    # 3-4 steps → 1× commission (base)
     (9, 0.5),    # 5-9 steps → 0.5× commission

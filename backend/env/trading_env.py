@@ -9,8 +9,9 @@ from data.pipelines.db_manager import HistoricalDBManager
 from data.preprocessing.greeks import calculate_black_scholes_greeks, calculate_black_scholes_price
 from backend.db.local_db_manager import LocalDBManager
 from backend.train.ppo_config import (
-    INITIAL_CAPITAL, PATIENCE_BONUS, DRAWDOWN_THRESHOLD,
-    DRAWDOWN_PENALTY_SCALE, VOL_SCALE_HIGH_THRESHOLD, VOL_SCALE_MED_THRESHOLD
+    INITIAL_CAPITAL, PATIENCE_BONUS, DRAWDOWN_THRESHOLD_SOFT,
+    DRAWDOWN_THRESHOLD_HARD, SOFT_PENALTY_SCALE, HARD_PENALTY_SCALE,
+    VOL_SCALE_HIGH_THRESHOLD, VOL_SCALE_MED_THRESHOLD
 )
 
 class TradingEnv(gym.Env):
@@ -632,14 +633,24 @@ class TradingEnv(gym.Env):
             self.state_manager.pos_peak_pnl[a_idx] = np.maximum(self.state_manager.pos_peak_pnl[a_idx], pnl_pcts)
             self.state_manager.pos_hold_dur[a_idx] += 1
             
-            # Drawdown penalty ONLY (no per-step holding cost)
+            # Tiered Drawdown Penalty
             pk = self.state_manager.pos_peak_pnl[a_idx]
             dd = pk - pnl_pcts
-            total_penalty = np.sum(np.where(
-                dd > DRAWDOWN_THRESHOLD, 
-                DRAWDOWN_PENALTY_SCALE * ((dd - DRAWDOWN_THRESHOLD) * 100.0), 
+            
+            # 1. Soft Penalty (6% - 12%)
+            soft_penalty = np.where(
+                (dd > DRAWDOWN_THRESHOLD_SOFT) & (dd <= DRAWDOWN_THRESHOLD_HARD),
+                SOFT_PENALTY_SCALE * ((dd - DRAWDOWN_THRESHOLD_SOFT) * 100.0),
                 0.0
-            ))
+            )
+            # 2. Hard Penalty (> 12%)
+            hard_base = SOFT_PENALTY_SCALE * (DRAWDOWN_THRESHOLD_HARD - DRAWDOWN_THRESHOLD_SOFT) * 100.0
+            hard_penalty = np.where(
+                dd > DRAWDOWN_THRESHOLD_HARD,
+                HARD_PENALTY_SCALE * ((dd - DRAWDOWN_THRESHOLD_HARD) * 100.0) + hard_base,
+                0.0
+            )
+            total_penalty = np.sum(soft_penalty + hard_penalty)
 
         self.state_manager._update_total_capital()
         new_capital = self.state_manager.total_capital
