@@ -43,7 +43,8 @@ def preload_symbols_data(symbols, start_date, end_date):
     temp_env = TradingEnv(
         symbols=symbols,
         start_date=buffer_start,
-        end_date=end_date
+        end_date=end_date,
+        min_active_symbols=1 # Allow pre-loading even for single symbols or small tracks
     )
     
     return temp_env.all_dfs
@@ -85,7 +86,7 @@ def evaluate_regime(model, name, symbols, start_date, end_date, preloaded_data=N
         initial_capital=INITIAL_CAPITAL,
         slippage=0.0005,
         preloaded_data=regime_data if regime_data else None,
-        min_active_symbols=MIN_SYMBOLS,
+        min_active_symbols=min(len(symbols), MIN_SYMBOLS) if symbols else MIN_SYMBOLS,
         max_active_symbols=MAX_SYMBOLS,
         total_slots=TOTAL_SLOTS,
         fixed_commission=FIXED_COMMISSION
@@ -148,8 +149,8 @@ def evaluate_regime(model, name, symbols, start_date, end_date, preloaded_data=N
             # This is robust against VecEnv auto-resets clearing current_step.
             bench_len = len(equity_curve)
             prices = df['close'].values[raw_env.lookback_window : raw_env.lookback_window + bench_len]
-            call_prices = df['atm_call_price'].values[raw_env.lookback_window : raw_env.lookback_window + bench_len]
-            put_prices = df['atm_put_price'].values[raw_env.lookback_window : raw_env.lookback_window + bench_len]
+            call_prices = df['e0_call_price'].values[raw_env.lookback_window : raw_env.lookback_window + bench_len]
+            put_prices = df['e0_put_price'].values[raw_env.lookback_window : raw_env.lookback_window + bench_len]
             
             if len(prices) == 0:
                 print(f"  Warning: prices length is 0 for {sym} (bench_len={bench_len}, lookback={raw_env.lookback_window})")
