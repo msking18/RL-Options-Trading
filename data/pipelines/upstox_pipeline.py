@@ -135,17 +135,9 @@ class UpstoxDataPipeline:
             "Nifty Bank": "NSE_INDEX|Nifty Bank",
             "Nifty Fin Service": "NSE_INDEX|Nifty Fin Service",
             "Nifty Midcap Select": "NSE_INDEX|NIFTY MID SELECT",
-            "Nifty Next 50": "NSE_INDEX|Nifty Next 50",
-            "Nifty 100": "NSE_INDEX|Nifty 100",
-            "Nifty 500": "NSE_INDEX|Nifty 500",
             "Nifty IT": "NSE_INDEX|Nifty IT",
-            "Nifty Auto": "NSE_INDEX|Nifty Auto",
-            "Nifty Pharma": "NSE_INDEX|Nifty Pharma",
-            "Nifty Metal": "NSE_INDEX|Nifty Metal",
-            "Nifty Energy": "NSE_INDEX|Nifty Energy",
-            "Nifty Realty": "NSE_INDEX|Nifty Realty",
-            "Nifty FMCG": "NSE_INDEX|Nifty FMCG",
-            "Nifty Infra": "NSE_INDEX|Nifty Infra"
+            "SENSEX": "BSE_INDEX|SENSEX",
+            "SENSEX50": "BSE_INDEX|SENSEX50"
         }
 
         # 2. Try to upgrade to Futures for eligible indices (ONLY for short lookbacks)
@@ -159,8 +151,7 @@ class UpstoxDataPipeline:
             "Nifty 50": "NIFTY",
             "Nifty Bank": "BANKNIFTY",
             "Nifty Fin Service": "FINNIFTY",
-            "Nifty Midcap Select": "MIDCPNIFTY",
-            "Nifty Next 50": "NIFTYNXT50"
+            "Nifty Midcap Select": "MIDCPNIFTY"
         }
 
         futs_df = master_df[master_df['instrument_type'] == 'FUTIDX'].copy()

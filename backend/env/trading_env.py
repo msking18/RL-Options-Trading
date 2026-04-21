@@ -11,7 +11,7 @@ from backend.db.local_db_manager import LocalDBManager
 from backend.train.ppo_config import (
     INITIAL_CAPITAL, PATIENCE_BONUS, DRAWDOWN_THRESHOLD_SOFT,
     DRAWDOWN_THRESHOLD_HARD, SOFT_PENALTY_SCALE, HARD_PENALTY_SCALE,
-    VOL_SCALE_HIGH_THRESHOLD, VOL_SCALE_MED_THRESHOLD
+    VOL_SCALE_HIGH_THRESHOLD, VOL_SCALE_MED_THRESHOLD, SL_TP_CATEGORIES
 )
 
 class TradingEnv(gym.Env):
@@ -107,13 +107,13 @@ class TradingEnv(gym.Env):
             self.symbol_to_idx = {sym: i for i, sym in enumerate(self.symbol_list)}
             
             # Determine all columns to be included in the tensor
-            first_df = next(iter(self.all_dfs.values()))
-            ohlcv_cols = ['open', 'high', 'low', 'close', 'volume', 'oi']
+            ohlcv_cols = ['open', 'high', 'low', 'close', 'volume', 'oi', 'dte_0', 'day_of_week', 'is_expiry_day']
             greek_cols = []
-            for i in range(-2, 3):
-                greek_cols.extend([f'strike_{i}_delta', f'strike_{i}_gamma', f'strike_{i}_theta', f'strike_{i}_vega'])
+            for e in [0, 1]:
+                for i in range(-2, 3):
+                    greek_cols.extend([f'e{e}_s{i}_delta', f'e{e}_s{i}_gamma', f'e{e}_s{i}_theta', f'e{e}_s{i}_vega'])
             tech_cols = ['RSI', 'ATR', 'Index_Vol', 'EMA_50', 'EMA_200']
-            price_cols = ['atm_call_price', 'atm_put_price']
+            price_cols = ['e0_call_price', 'e0_put_price', 'e1_call_price', 'e1_put_price']
             
             self.tensor_cols = ohlcv_cols + greek_cols + tech_cols + price_cols + self.external_features_cols
             self.col_to_idx = {col: i for i, col in enumerate(self.tensor_cols)}
@@ -131,9 +131,10 @@ class TradingEnv(gym.Env):
         
         # --- End NumPy Refactor ---
 
-        # Action Space: MultiDiscrete(5, 5, ..., 5) for fixed total_slots
-        # Each index: 0:Hold, 1:Buy Call, 2:Buy Put, 3:Exit Call, 4:Exit Put
-        self.action_space = spaces.MultiDiscrete([5] * self.total_slots)
+        # Action Space: MultiDiscrete with 2 dimensions per slot:
+        # 0: Action (0:Hold, 1:Buy Call, 2:Buy Put, 3:Exit)
+        # 1: Risk (0:Tight, 1:Regular, 2:Aggressive, 3:None)
+        self.action_space = spaces.MultiDiscrete([4, len(SL_TP_CATEGORIES)] * self.total_slots)
         
         self.current_step = self.lookback_window
         self.max_steps = num_timesteps - 1
@@ -145,20 +146,46 @@ class TradingEnv(gym.Env):
         self.idx_close = self.col_to_idx['close']
         self.idx_volume = self.col_to_idx['volume']
         self.idx_oi = self.col_to_idx['oi']
+        self.idx_dte = self.col_to_idx['dte_0']
+        self.idx_dow = self.col_to_idx['day_of_week']
+        self.idx_is_expiry = self.col_to_idx['is_expiry_day']
+
         self.idx_rsi = self.col_to_idx['RSI']
         self.idx_atr = self.col_to_idx['ATR']
         self.idx_vol = self.col_to_idx['Index_Vol']
         self.idx_ema50 = self.col_to_idx['EMA_50']
         self.idx_ema200 = self.col_to_idx['EMA_200']
-        self.idx_call = self.col_to_idx['atm_call_price']
-        self.idx_put = self.col_to_idx['atm_put_price']
+        
+        # Default to Current Day Expiry (e0) for quick access
+        self.idx_call_e0 = self.col_to_idx['e0_call_price']
+        self.idx_put_e0 = self.col_to_idx['e0_put_price']
+        self.idx_call_e1 = self.col_to_idx['e1_call_price']
+        self.idx_put_e1 = self.col_to_idx['e1_put_price']
+
         self.idx_ext_start = self.col_to_idx[self.external_features_cols[0]]
         self.idx_max_impact = self.col_to_idx['Max_Impact']
         self.idx_pos_score = self.col_to_idx['Pos_Score_Lag1']
         self.idx_neg_score = self.col_to_idx['Neg_Score_Lag1']
 
+        # LOT SIZE MAPPING for NSE/BSE Indices
+        self.lot_size_map = {
+            "Nifty 50": 50, "Nifty Bank": 15, "Nifty Fin Service": 40,
+            "Nifty Midcap Select": 75, "Nifty Next 50": 25, "SENSEX": 10, "SENSEX50": 15
+        }
+        self.slot_to_symbol = {} 
+        self.slot_to_idx = {}    
+        self.high_water_mark = initial_capital
+
         # Pre-allocate Observation Buffer (NumPy array)
-        self.per_symbol_segment_size = (self.lookback_window * 6) + (5 * 4) + 3 + 5
+        # Per symbol features adjusted: 
+        # (lb*6) for OHLCV [lb*4] + Vol [lb] + OI [lb]
+        # (2 * 5 * 4) for Greeks [2 expiries * 5 strikes * 4 greeks]
+        # (2 * 2) for Call/Put Price [2 expiries * 2 types]
+        # 3 for Pos Value, Type, Duration
+        # 5 for RSI, ATR, Vol, Trend, DD
+        # 3 for DTE, DayOfWeek, IsExpiry
+        # 2 for Lot Size, Contract Value (Risk Management Features)
+        self.per_symbol_segment_size = (self.lookback_window * 6) + (2 * 5 * 4) + (2 * 2) + 3 + 5 + 3 + 2
         self.total_obs_size = (self.per_symbol_segment_size * self.total_slots) + 2 + len(self.external_features_cols)
         self.obs_buffer = np.zeros(self.total_obs_size, dtype=np.float32)
         
@@ -169,10 +196,11 @@ class TradingEnv(gym.Env):
             start = 2 + (i * self.per_symbol_segment_size)
             self.slot_slices.append((start, start + self.per_symbol_segment_size))
             
-        self.observation_space = spaces.Box(low=-1e6, high=1e6, shape=(self.total_obs_size,), dtype=np.float32)
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(self.total_obs_size,), dtype=np.float32)
 
-        # Pre-allocate Action Mask (MultiDiscrete total_slots * 5)
-        self.action_mask_buf = np.zeros(self.total_slots * 5, dtype=bool)
+        # Pre-allocate Action Mask (MultiDiscrete total_slots * 8)
+        # Dimensions: 4 (Action) + 4 (Risk) = 8 per slot
+        self.action_mask_buf = np.zeros(self.total_slots * (4 + len(SL_TP_CATEGORIES)), dtype=bool)
         
         self.reset()
         for i in range(self.total_slots):
@@ -180,36 +208,9 @@ class TradingEnv(gym.Env):
             end = start + self.per_symbol_segment_size
             self.slot_slices.append((start, end))
 
-        self.observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, shape=(self.total_obs_size,), dtype=np.float32
-        )
         
         # Track symbol-to-slot mapping and active mask for randomization
         self.active_slots_mask = [False] * self.total_slots
-        self.slot_to_symbol = {} # Mapping slot index to symbol name
-        self.slot_to_idx = {}    # Mapping slot index to symbol index in data_tensor
-        
-        # Performance Tracking
-        self.high_water_mark = initial_capital
-        
-        # LOT SIZE MAPPING for NSE Indices
-        self.lot_size_map = {
-            "Nifty 50": 50,
-            "Nifty Bank": 15,
-            "Nifty Fin Service": 40,
-            "Nifty Midcap Select": 75,
-            "Nifty Next 50": 25,
-            "Nifty 100": 50,
-            "Nifty 500": 25,
-            "Nifty IT": 50,
-            "Nifty Auto": 50,
-            "Nifty Pharma": 50,
-            "Nifty Metal": 25,
-            "Nifty Energy": 25,
-            "Nifty Realty": 50,
-            "Nifty FMCG": 25,
-            "Nifty Infra": 75
-        }
 
     def _merge_external_signals(self, df, symbol):
         """Merges historical sentiment, macro, and event data into df."""
@@ -334,67 +335,84 @@ class TradingEnv(gym.Env):
         
         return df
 
+    def _get_expiry_dte(self, symbol, timestamp):
+        """Calculates days to next expiry for a given symbol and timestamp."""
+        # Key Expiry Day Mapping (0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri, 5=Sat, 6=Sun)
+        expiry_map = {
+            "Nifty 50": 3,
+            "Nifty Bank": 2,
+            "Nifty Fin Service": 1,
+            "Nifty Midcap Select": 0,
+            "Nifty Next 50": 4,
+            "SENSEX": 4,
+            "SENSEX50": 4
+        }
+        target_day = expiry_map.get(symbol, 3) # Default to Thursday
+        current_day = timestamp.dayofweek
+        
+        # Days until next target_day
+        days_to_expiry = (target_day - current_day) % 7
+        return float(days_to_expiry)
+
     def _precalculate_data(self, df, symbol):
-        """Pre-calculates technical indicators and Greeks using vectorized logic to optimize runtime."""
+        """Pre-calculates technical indicators and Greeks (Current and Next Week) using vectorized logic."""
         from scipy.stats import norm
         
-        if "Bank" in symbol:
+        if "Bank" in symbol or "SENSEX" in symbol:
             strike_step = 100
         else:
             strike_step = 50
             
-        print(f"  - Vectorizing Greeks for {symbol}...")
+        print(f"  - Vectorizing Greeks & Multi-Expiry Data for {symbol}...")
         
-        # 1. Calculate ATM Strike for the entire series
+        # 1. Base Logic
         spot = df['close'].values
         vol = df['Index_Vol'].values if 'Index_Vol' in df.columns else np.full_like(spot, 0.18)
-        vol = np.maximum(vol, 1e-6) # Prevent divide-by-zero warnings
-        dte = 5.0 # Constant for now
+        vol = np.maximum(vol, 1e-6)
+        
+        parsed_times = pd.to_datetime(df['time'])
+        dtes_0 = np.array([self._get_expiry_dte(symbol, t) for t in parsed_times])
+        dtes_1 = dtes_0 + 7.0 # Next week's expiry
+        
+        df['dte_0'] = dtes_0
+        df['day_of_week'] = parsed_times.dt.dayofweek.values.astype(float)
+        df['is_expiry_day'] = (dtes_0 == 0).astype(float)
         
         atm_strike = np.round(spot / strike_step) * strike_step
-        
-        # 2. Iterate through relative strikes (only 5 iterations instead of len(df))
-        for i in range(-2, 3):
-            strike = atm_strike + (i * strike_step)
+        rate = 0.07
+
+        # 2. Iterate through expiries (Current and Next)
+        for e_idx, dtes in enumerate([dtes_0, dtes_1]):
+            # Clip DTE to prevent divide by zero near close (min 5 mins)
+            T = np.maximum(dtes, 5.0/1440.0) / 365.0
             
-            # Use direct numpy/scipy logic here to avoid overhead of round() and dict creation in a loop
-            T = dte / 365.0
-            rate = 0.07
+            for i in range(-2, 3):
+                strike = atm_strike + (i * strike_step)
+                d1 = (np.log(spot / strike) + (rate + 0.5 * vol**2) * T) / (vol * np.sqrt(T))
+                d2 = d1 - vol * np.sqrt(T)
+                
+                df[f'e{e_idx}_s{i}_delta'] = norm.cdf(d1)
+                df[f'e{e_idx}_s{i}_gamma'] = norm.pdf(d1) / (spot * vol * np.sqrt(T)) * 100
+                theta_call = (- (spot * norm.pdf(d1) * vol) / (2 * np.sqrt(T)) 
+                             - rate * strike * np.exp(-rate * T) * norm.cdf(d2)) / 365.0
+                df[f'e{e_idx}_s{i}_theta'] = theta_call
+                df[f'e{e_idx}_s{i}_vega'] = (spot * norm.pdf(d1) * np.sqrt(T)) / 100.0
+                
+            # ATM Prices (e_idx case)
+            d1_atm = (np.log(spot / atm_strike) + (rate + 0.5 * vol**2) * T) / (vol * np.sqrt(T))
+            d2_atm = d1_atm - vol * np.sqrt(T)
+            df[f'e{e_idx}_call_price'] = spot * norm.cdf(d1_atm) - atm_strike * np.exp(-rate * T) * norm.cdf(d2_atm)
+            df[f'e{e_idx}_put_price'] = atm_strike * np.exp(-rate * T) * norm.cdf(-d2_atm) - spot * norm.cdf(-d1_atm)
             
-            # d1, d2
-            d1 = (np.log(spot / strike) + (rate + 0.5 * vol**2) * T) / (vol * np.sqrt(T))
-            d2 = d1 - vol * np.sqrt(T)
-            
-            # Delta, Gamma, Theta, Vega
-            df[f'strike_{i}_delta'] = norm.cdf(d1)
-            df[f'strike_{i}_gamma'] = norm.pdf(d1) / (spot * vol * np.sqrt(T)) * 100
-            
-            # Theta (Call)
-            theta_call = (- (spot * norm.pdf(d1) * vol) / (2 * np.sqrt(T)) 
-                         - rate * strike * np.exp(-rate * T) * norm.cdf(d2)) / 365.0
-            df[f'strike_{i}_theta'] = theta_call
-            
-            # Vega
-            df[f'strike_{i}_vega'] = (spot * norm.pdf(d1) * np.sqrt(T)) / 100.0
-        
-        # 3. Calculate ATM Prices for entire series
-        # Using atm_strike (i=0 case)
-        d1_atm = (np.log(spot / atm_strike) + (rate + 0.5 * vol**2) * T) / (vol * np.sqrt(T))
-        d2_atm = d1_atm - vol * np.sqrt(T)
-        
-        df['atm_call_price'] = spot * norm.cdf(d1_atm) - atm_strike * np.exp(-rate * T) * norm.cdf(d2_atm)
-        df['atm_put_price'] = atm_strike * np.exp(-rate * T) * norm.cdf(-d2_atm) - spot * norm.cdf(-d1_atm)
-        
-        # Ensure minimum prices
-        df['atm_call_price'] = df['atm_call_price'].clip(lower=0.01)
-        df['atm_put_price'] = df['atm_put_price'].clip(lower=0.01)
+            df[f'e{e_idx}_call_price'] = df[f'e{e_idx}_call_price'].clip(lower=0.01)
+            df[f'e{e_idx}_put_price'] = df[f'e{e_idx}_put_price'].clip(lower=0.01)
             
         return df
 
     def _get_obs(self):
         """
         Ultra-high-performance fully vectorized 3D observation generation.
-        Reduces Python overhead by performing heavy lifting in NumPy 3D blocks.
+        Expanded to include multi-expiry Greeks, prices, and temporal features.
         """
         # 1. Global Portfolio State
         self.obs_buffer[0] = self.state_manager.total_capital / self.initial_capital
@@ -403,8 +421,6 @@ class TradingEnv(gym.Env):
         # 2. Per-Slot Data (Vectorized 3D approach)
         active_slots = [i for i, active in enumerate(self.active_slots_mask) if active]
         
-        # Zero out only the part of the buffer for symbols to avoid stale data from previous symbols
-        # (External features and portfolio state are always overwritten)
         data_section_end = self.total_obs_size - len(self.external_features_cols)
         self.obs_buffer[2 : data_section_end] = 0.0
         
@@ -420,61 +436,91 @@ class TradingEnv(gym.Env):
             base_prices = windows[:, 0, self.idx_close].reshape(-1, 1, 1)
             base_prices[base_prices == 0] = 1.0
             
+            # Optimized slicing and reshaping
             norm_ohlc = (windows[:, :, self.idx_open : self.idx_close+1] / base_prices).reshape(len(active_slots), -1)
             norm_vol = (np.log1p(windows[:, :, self.idx_volume]) / 15.0).reshape(len(active_slots), -1)
             norm_oi = (np.log1p(windows[:, :, self.idx_oi]) / 20.0).reshape(len(active_slots), -1)
             
-            # 3. Greeks Scaling (Vectorized Batch)
-            greeks = current_data[:, self.idx_oi + 1 : self.idx_oi + 21].copy()
-            greeks[:, 1::4] *= 0.1  # Gamma
-            greeks[:, 2::4] *= 0.01 # Theta
-            greeks[:, 3::4] *= 0.01 # Vega
-            
-            # 4. Technicals + Metrics (Already 3D)
+            # 3. Multi-Expiry Greeks (e0 and e1 - 40 features total)
+            # Greek columns follow OI in our tensor_cols definition
+            greeks_start = self.idx_oi + 4 # Skip dte, dow, is_expiry
+            greeks = current_data[:, greeks_start : greeks_start + 40].copy()
+            greeks[:, 1::4] *= 0.1  # Gamma scaling
+            greeks[:, 2::4] *= 0.01 # Theta scaling
+            greeks[:, 3::4] *= 0.01 # Vega scaling
+
+            # 4. Expiry Option Prices (4 features: Call0, Put0, Call1, Put1)
             spots = current_data[:, self.idx_close]
+            prices_idx = self.idx_call_e0
+            opt_prices = current_data[:, prices_idx : prices_idx + 4] / spots.reshape(-1, 1)
+            
+            # 5. Technicals + Metrics (Already 3D)
             rsis = (current_data[:, self.idx_rsi] - 50.0) / 50.0
-            atrs = np.where(spots > 0, current_data[:, self.idx_atr] / spots, 0.0)
+            atrs = np.where(spots > 1.0, current_data[:, self.idx_atr] / spots, 0.0)
             vols = current_data[:, self.idx_vol]
             emas_trend = np.where(current_data[:, self.idx_ema50] > current_data[:, self.idx_ema200], 1.0, -1.0)
             
-            # 5. Position Features from StateManager (Vectorized Arrays)
+            # 6. Temporal Features
+            dtes = current_data[:, self.idx_dte] / 7.0
+            dows = current_data[:, self.idx_dow] / 6.0
+            is_expiry = current_data[:, self.idx_is_expiry]
+            
+            # 7. Position Features
             entry_prices = self.state_manager.pos_entry_price[active_sym_idxs]
             pos_types = self.state_manager.pos_type[active_sym_idxs]
             curr_vals = self.state_manager.pos_curr_value[active_sym_idxs]
             durations = np.minimum(1.0, self.state_manager.pos_hold_dur[active_sym_idxs] / 100.0)
             peak_pnls = self.state_manager.pos_peak_pnl[active_sym_idxs]
             
-            # Map pos_type string logic back to option prices
-            call_prices = current_data[:, self.idx_call]
-            put_prices = current_data[:, self.idx_put]
-            curr_option_prices = np.where(pos_types == 1, call_prices, put_prices)
-            pnl_pcts = np.divide(curr_option_prices - entry_prices, entry_prices, 
-                                 out=np.zeros_like(entry_prices), where=entry_prices > 0)
+            # PnL Calculation relative to Entry
+            # We need to know which expiry was traded for better PnL tracking in obs, 
+            # but StateManager.pos_curr_value already has the value.
+            sym_total_cap = self.initial_capital
+            pnl_pcts = np.zeros_like(entry_prices)
+            valid_pos = (entry_prices > 0)
+            if np.any(valid_pos):
+                # StateManager tracks curr_value based on the specific contract traded
+                # pnl_pct = (curr_val / qty - entry) / entry
+                pnl_pcts[valid_pos] = (curr_vals[valid_pos] / self.state_manager.pos_qty[active_sym_idxs][valid_pos] - entry_prices[valid_pos]) / entry_prices[valid_pos]
+            
             trailing_drawdowns = peak_pnls - pnl_pcts
             
             # Construct Per-Symbol Feature Matrix for Fast Copying
-            # Each sym has: [OHLC(lb*4), Vol(lb), OI(lb), Greeks(20), Val, Type, Dur, RSI, ATR, Vol, Trend, DD]
-            # [N_ACTIVE, FEATURES_PER_SYM]
             sym_features = np.zeros((len(active_slots), self.per_symbol_segment_size), dtype=np.float32)
             
             f_idx = 0
+            # lb*6
             sym_features[:, f_idx : f_idx + lb*4] = norm_ohlc; f_idx += lb*4
             sym_features[:, f_idx : f_idx + lb] = norm_vol; f_idx += lb
             sym_features[:, f_idx : f_idx + lb] = norm_oi; f_idx += lb
-            sym_features[:, f_idx : f_idx + 20] = greeks; f_idx += 20
-            
+            # Greeks (40)
+            sym_features[:, f_idx : f_idx + 40] = greeks; f_idx += 40
+            # Opt Prices (4)
+            sym_features[:, f_idx : f_idx + 4] = opt_prices; f_idx += 4
+            # Pos Val (1), Type (1), Dur (1)
             sym_features[:, f_idx] = curr_vals / self.initial_capital; f_idx += 1
             sym_features[:, f_idx] = (pos_types > 0).astype(np.float32); f_idx += 1
             sym_features[:, f_idx] = durations; f_idx += 1
-            
+            # Indicators (5)
             sym_features[:, f_idx] = rsis; f_idx += 1
             sym_features[:, f_idx] = atrs; f_idx += 1
             sym_features[:, f_idx] = vols; f_idx += 1
             sym_features[:, f_idx] = emas_trend; f_idx += 1
             sym_features[:, f_idx] = trailing_drawdowns; f_idx += 1
+            # Temporal (3)
+            sym_features[:, f_idx] = dtes; f_idx += 1
+            sym_features[:, f_idx] = dows; f_idx += 1
+            sym_features[:, f_idx] = is_expiry; f_idx += 1
+            
+            # Risk Management Awareness (2)
+            lot_sizes = np.array([self.lot_size_map.get(self.symbol_list[idx], 50) for idx in active_sym_idxs])
+            sym_features[:, f_idx] = lot_sizes / 75.0; f_idx += 1
+            sym_features[:, f_idx] = (spots * lot_sizes) / self.state_manager.total_capital; f_idx += 1
             
             # Write to buffer by slot
             for j, slot_i in enumerate(active_slots):
+                start, end = self.slot_slices[slot_i]
+                self.obs_buffer[start : end] = sym_features[j]
                 start, end = self.slot_slices[slot_i]
                 self.obs_buffer[start : end] = sym_features[j]
                 
@@ -496,12 +542,16 @@ class TradingEnv(gym.Env):
 
     def _update_action_masks_vectorized(self):
         """
-        Fully vectorized action mask computation for all slots simultaneously.
+        Fully vectorized action mask computation for 2D action space (Action, Risk).
         """
-        # Reset entire mask (10, 5)
-        m = self.action_mask_buf.reshape(self.total_slots, 5)
+        # Dimensions per slot: 4 (Action) + 4 (Risk) = 8
+        stride = 4 + len(SL_TP_CATEGORIES)
+        m = self.action_mask_buf.reshape(self.total_slots, stride)
         m.fill(False)
-        m[:, 0] = True # Hold is always valid if active
+        m[:, 0] = True # Hold is always valid
+        
+        # Risk choices are always valid if slot is active
+        m[:, 4:] = True # Risk dim
         
         active_indices = np.where(self.active_slots_mask)[0]
         if len(active_indices) == 0:
@@ -510,21 +560,13 @@ class TradingEnv(gym.Env):
         active_sym_idxs = np.array([self.slot_to_idx[i] for i in active_indices])
         pos_types = self.state_manager.pos_type[active_sym_idxs]
         
-        # 0: Hold, 1: Buy Call, 2: Buy Put, 3: Exit Call, 4: Exit Put
-        # Flat symbols (type 0)
+        # Action dim: 0:Hold, 1:Buy Call, 2:Buy Put, 3:Exit
         flat = (pos_types == 0)
         m[active_indices[flat], 1] = True
         m[active_indices[flat], 2] = True
         
-        # Long Call (type 1) — only allow exit if active
-        calls = (pos_types == 1)
-        m[active_indices[calls], 3] = True
-        
-        # Long Put (type 2) — only allow exit if active
-        puts = (pos_types == 2)
-        m[active_indices[puts], 4] = True
-        
-        # Inactive slots already handled (only Hold is True)
+        in_pos = (pos_types > 0)
+        m[active_indices[in_pos], 3] = True
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -556,26 +598,21 @@ class TradingEnv(gym.Env):
         return self._get_obs(), {}
 
     def step(self, actions):
-        """
-        Ultra-high-performance vectorized step.
-        Processes all slots simultaneously and updates state in bulk.
-        """
+        """Vectorized step supporting 2D actions (Action, Risk) and hardcoded e0 expiry."""
         prev_capital = self.state_manager.total_capital
         self.state_manager.current_step = self.current_step
         
-        # 1. Process Actions (Vectorized Logic with minimal loops)
+        # Map flat actions back to per-slot [total_slots, 2]
+        action_matrix = actions.reshape(self.total_slots, 2)
+        
+        # 1. Process Actions
         active_indices = np.where(self.active_slots_mask)[0]
         if len(active_indices) > 0:
-            active_actions = actions[active_indices]
+            slot_actions = action_matrix[active_indices] # [N, 2]
             active_sym_idxs = np.array([self.slot_to_idx[i] for i in active_indices])
             curr_data = self.data_tensor[active_sym_idxs, self.current_step]
             
-            # Exits
-            ext_calls = (active_actions == 3) & (self.state_manager.pos_type[active_sym_idxs] == 1)
-            ext_puts = (active_actions == 4) & (self.state_manager.pos_type[active_sym_idxs] == 2)
-            
-            # Common external context for all trade exits at this step
-            # Use data from the first active symbol (all symbols share the same daily external features)
+            # Universal contextual info for trade logs
             first_idx = active_sym_idxs[0]
             extra_info = {
                 'sentiment_pos': float(self.data_tensor[first_idx, self.current_step, self.idx_pos_score]),
@@ -583,74 +620,137 @@ class TradingEnv(gym.Env):
                 'max_impact': int(self.data_tensor[first_idx, self.current_step, self.idx_max_impact])
             }
             
-            for i in np.where(ext_calls | ext_puts)[0]:
-                self.state_manager.exit_position(self.slot_to_symbol[active_indices[i]], 
-                                              curr_data[i, self.idx_call] if ext_calls[i] else curr_data[i, self.idx_put],
-                                              extra_info=extra_info)
+            exits = (slot_actions[:, 0] == 3) & (self.state_manager.pos_type[active_sym_idxs] > 0)
             
-            # Enters
-            buy_calls = (active_actions == 1) & (self.state_manager.pos_type[active_sym_idxs] == 0)
-            buy_puts = (active_actions == 2) & (self.state_manager.pos_type[active_sym_idxs] == 0)
+            if np.any(exits):
+                exit_indices = active_sym_idxs[exits]
+                # Determine price: ALWAYS Current Week (e0) due to restriction for new trades,
+                # but handle correctly if existing position is e1
+                opened_e_idxs = self.state_manager.pos_expiry_index[exit_indices]
+                p_types = self.state_manager.pos_type[exit_indices]
+                
+                # Vectorized column selection for exit prices
+                exit_cols = np.where(opened_e_idxs == 0, self.idx_call_e0, self.idx_call_e1)
+                exit_cols = np.where(p_types == 2, exit_cols + 1, exit_cols) # Put if type is 2
+                
+                # Fetch prices from curr_data (which is already indexed by active_sym_idxs)
+                # We need the relative index in curr_data
+                rel_exits = np.where(exits)[0]
+                exit_prices = curr_data[rel_exits, exit_cols]
+                
+                self.state_manager.bulk_exit(exit_indices, exit_prices, extra_info=extra_info)
+            
+            # Enters (Action 1: Buy Call, 2: Buy Put)
+            buy_calls = (slot_actions[:, 0] == 1) & (self.state_manager.pos_type[active_sym_idxs] == 0)
+            buy_puts = (slot_actions[:, 0] == 2) & (self.state_manager.pos_type[active_sym_idxs] == 0)
+            
             for i in np.where(buy_calls | buy_puts)[0]:
                 sym = self.slot_to_symbol[active_indices[i]]
-                base_lot_size = getattr(self, 'lot_size_map', {}).get(sym, 50)
+                e_idx = 0 # Forced restriction to Current Week
+                risk_idx = slot_actions[i, 1] 
+                sl_pct, tp_pct = SL_TP_CATEGORIES[risk_idx]
                 
-                # Volatility-conditional position sizing
-                sym_vol = curr_data[i, self.idx_vol]  # Annualized vol
-                if sym_vol > VOL_SCALE_HIGH_THRESHOLD:
-                    vol_scale = 0.5    # High vol → half size
-                elif sym_vol > VOL_SCALE_MED_THRESHOLD:
-                    vol_scale = 0.75   # Medium vol → 3/4 size
-                else:
-                    vol_scale = 1.0    # Low vol → full size
+                base_lot_size = getattr(self, 'lot_size_map', {}).get(sym, 50)
+                sym_vol = curr_data[i, self.idx_vol]
+                vol_scale = 0.5 if sym_vol > VOL_SCALE_HIGH_THRESHOLD else (0.75 if sym_vol > VOL_SCALE_MED_THRESHOLD else 1.0)
                 lot_size = max(1, int(base_lot_size * vol_scale))
                 
+                col = self.idx_call_e0 # e_idx 0
+                if buy_puts[i]: col += 1
+                
                 self.state_manager.enter_position(sym, 'LONG_CALL' if buy_calls[i] else 'LONG_PUT',
-                                               curr_data[i, self.idx_call] if buy_calls[i] else curr_data[i, self.idx_put],
-                                               curr_data[i, self.idx_close],
-                                               quantity=lot_size)
+                                               curr_data[i, col], curr_data[i, self.idx_close],
+                                               quantity=lot_size, sl_pct=sl_pct, tp_pct=tp_pct, expiry_idx=e_idx)
 
         # 2. Transition
         self.current_step += 1
         done = (self.current_step >= self.max_steps)
         
-        # 3. Vectorized Position Updates & Drawdown Penalty (NO per-step holding cost)
+        # 3. Vectorized Position Updates & Intra-Candle SL Simulation
         act_mask = (self.state_manager.pos_type > 0)
         total_penalty = 0.0
         if np.any(act_mask):
             a_idx = np.where(act_mask)[0]
             nxt_data = self.data_tensor[a_idx, self.current_step]
             
-            # Update curr_value
+            # Simulated Intra-Candle logic: Delta-based approximation of option High/Low
+            spot_high = nxt_data[:, self.idx_high]
+            spot_low = nxt_data[:, self.idx_low]
+            spot_close = nxt_data[:, self.idx_close]
+            spot_prev_close = self.data_tensor[a_idx, self.current_step - 1, self.idx_close]
+            
+            # Option price updates
+            e_indices = self.state_manager.pos_expiry_index[a_idx]
             p_types = self.state_manager.pos_type[a_idx]
-            prices = np.where(p_types == 1, nxt_data[:, self.idx_call], nxt_data[:, self.idx_put])
-            self.state_manager.pos_curr_value[a_idx] = prices * self.state_manager.pos_qty[a_idx]
             
-            # Update hold_dur and peaks
+            # Next candle's OHLC prices for the options
+            # Simplified: Option price moves by Index * Delta
+            # We will use the e0/e1 call/put prices directly for the next candle's CLOSE,
+            # but for High/Low we approximate using spot volatility.
+            nxt_call_e0 = nxt_data[:, self.idx_call_e0]
+            nxt_put_e0 = nxt_data[:, self.idx_put_e0]
+            nxt_call_e1 = nxt_data[:, self.idx_call_e1]
+            nxt_put_e1 = nxt_data[:, self.idx_put_e1]
+            
+            close_prices = np.zeros_like(p_types, dtype=np.float32)
+            close_prices = np.where((e_indices == 0) & (p_types == 1), nxt_call_e0, close_prices)
+            close_prices = np.where((e_indices == 0) & (p_types == 2), nxt_put_e0, close_prices)
+            close_prices = np.where((e_indices == 1) & (p_types == 1), nxt_call_e1, close_prices)
+            close_prices = np.where((e_indices == 1) & (p_types == 2), nxt_put_e1, close_prices)
+            
+            # Approximate Low price of the option during the candle to check SL
+            # Option Low ≈ Current Close - (Spot Close - Spot Low) * Delta
+            # (Crude but survivable for 5m TF)
+            # Find Delta index: e{e}_s0_delta is at idx_oi + 4 + (e*20) + (0*4) = idx_oi + 4 + e*20
+            p_deltas = np.zeros_like(p_types, dtype=np.float32)
+            for j, e_val in enumerate([0, 1]):
+                mask_e = (e_indices == e_val)
+                if np.any(mask_e):
+                    # Index of s0_delta for expiry e_val
+                    delta_col = self.idx_oi + 4 + (e_val * 20)
+                    p_deltas[mask_e] = nxt_data[mask_e, delta_col]
+            
+            # Calls suffer when spot goes Low, Puts suffer when spot goes High
+            spot_move_against = np.where(p_types == 1, spot_prev_close - spot_low, spot_high - spot_prev_close)
+            spot_move_against = np.maximum(0, spot_move_against)
+            opt_low_approx = close_prices - (spot_move_against * p_deltas)
+            
+            # Check for SL hits
             entries = self.state_manager.pos_entry_price[a_idx]
-            pnl_pcts = np.divide(prices - entries, entries, 
-                                 out=np.zeros_like(entries), where=entries > 0)
-            self.state_manager.pos_peak_pnl[a_idx] = np.maximum(self.state_manager.pos_peak_pnl[a_idx], pnl_pcts)
-            self.state_manager.pos_hold_dur[a_idx] += 1
+            sl_prices = self.state_manager.pos_sl_price[a_idx]
+            sl_hits = (sl_prices > 0) & (opt_low_approx <= sl_prices)
             
-            # Tiered Drawdown Penalty
-            pk = self.state_manager.pos_peak_pnl[a_idx]
-            dd = pk - pnl_pcts
+            # Check for TP hits (Approx Option High)
+            spot_move_favor = np.where(p_types == 1, spot_high - spot_prev_close, spot_prev_close - spot_low)
+            spot_move_favor = np.maximum(0, spot_move_favor)
+            opt_high_approx = close_prices + (spot_move_favor * p_deltas)
+            tp_prices = self.state_manager.pos_tp_price[a_idx]
+            tp_hits = (tp_prices > 0) & (opt_high_approx >= tp_prices)
             
-            # 1. Soft Penalty (6% - 12%)
-            soft_penalty = np.where(
-                (dd > DRAWDOWN_THRESHOLD_SOFT) & (dd <= DRAWDOWN_THRESHOLD_HARD),
-                SOFT_PENALTY_SCALE * ((dd - DRAWDOWN_THRESHOLD_SOFT) * 100.0),
-                0.0
-            )
-            # 2. Hard Penalty (> 12%)
-            hard_base = SOFT_PENALTY_SCALE * (DRAWDOWN_THRESHOLD_HARD - DRAWDOWN_THRESHOLD_SOFT) * 100.0
-            hard_penalty = np.where(
-                dd > DRAWDOWN_THRESHOLD_HARD,
-                HARD_PENALTY_SCALE * ((dd - DRAWDOWN_THRESHOLD_HARD) * 100.0) + hard_base,
-                0.0
-            )
-            total_penalty = np.sum(soft_penalty + hard_penalty)
+            # Process Exits for SL/TP hits first
+            hitter_indices = np.where(sl_hits | tp_hits)[0]
+            if len(hitter_indices) > 0:
+                exit_indices = a_idx[hitter_indices]
+                exit_prices = np.where(sl_hits[hitter_indices], sl_prices[hitter_indices], tp_prices[hitter_indices])
+                self.state_manager.bulk_exit(exit_indices, exit_prices, extra_info={'sl_tp_hit': True})
+            
+            # Remaining positions update curr_value
+            remaining = ~ (sl_hits | tp_hits)
+            if np.any(remaining):
+                r_idx = a_idx[remaining]
+                self.state_manager.pos_curr_value[r_idx] = close_prices[remaining] * self.state_manager.pos_qty[r_idx]
+                
+                # Update hold_dur and peaks
+                pnl_pcts = (close_prices[remaining] - entries[remaining]) / entries[remaining]
+                self.state_manager.pos_peak_pnl[r_idx] = np.maximum(self.state_manager.pos_peak_pnl[r_idx], pnl_pcts)
+                self.state_manager.pos_hold_dur[r_idx] += 1
+                
+                # Tiered Drawdown Penalty on remaining positions
+                dd = self.state_manager.pos_peak_pnl[r_idx] - pnl_pcts
+                pen = np.where(dd > DRAWDOWN_THRESHOLD_HARD, 
+                               HARD_PENALTY_SCALE * ((dd - DRAWDOWN_THRESHOLD_HARD) * 100.0),
+                               np.where(dd > DRAWDOWN_THRESHOLD_SOFT, SOFT_PENALTY_SCALE * ((dd - DRAWDOWN_THRESHOLD_SOFT) * 100.0), 0.0))
+                total_penalty = np.sum(pen)
 
         self.state_manager._update_total_capital()
         new_capital = self.state_manager.total_capital
@@ -662,7 +762,7 @@ class TradingEnv(gym.Env):
         # Patience bonus: reward flat holds (active slot, no position, chose Hold)
         if len(active_indices) > 0:
             flat_holds = np.sum(
-                (active_actions == 0) & (self.state_manager.pos_type[active_sym_idxs] == 0)
+                (slot_actions[:, 0] == 0) & (self.state_manager.pos_type[active_sym_idxs] == 0)
             )
             reward += flat_holds * PATIENCE_BONUS
         
@@ -683,5 +783,18 @@ class TradingEnv(gym.Env):
     def close_all_positions(self):
         """Vectorized close-all for indices."""
         idx = min(self.current_step, self.max_steps)
-        current_prices = {sym: self.data_tensor[i, idx, self.idx_call] for i, sym in enumerate(self.symbol_list)}
+        
+        current_prices = {}
+        for i, sym in enumerate(self.symbol_list):
+            p_type = self.state_manager.pos_type[i]
+            if p_type == 0:
+                current_prices[sym] = 0.0
+                continue
+                
+            e_idx = self.state_manager.pos_expiry_index[i]
+            col = self.idx_call_e0 if e_idx == 0 else self.idx_call_e1
+            if p_type == 2: col += 1 # Put price is next col
+            
+            current_prices[sym] = float(self.data_tensor[i, idx, col])
+            
         self.state_manager.close_all_positions(current_prices)

@@ -14,9 +14,8 @@ def discover_indices():
         print(f"Failed to download master list: {e}")
         return
 
-    # Filter for NSE Indices
-    # Note: Exchange 'NSE_INDEX' is correct. Instrument type is often 'index' or 'INDEX'.
-    indices_df = df[df['exchange'] == 'NSE_INDEX'].copy()
+    # Filter for NSE and BSE Indices
+    indices_df = df[df['exchange'].isin(['NSE_INDEX', 'BSE_INDEX'])].copy()
     
     # Target names to find and their common aliases
     target_map = {
@@ -25,6 +24,8 @@ def discover_indices():
         "Nifty Fin Service": ["Nifty Fin Service", "FINNIFTY"],
         "Nifty Midcap Select": ["Nifty Midcap Select", "MIDCPNIFTY", "NIFTY MID SELECT"],
         "Nifty Next 50": ["Nifty Next 50", "NIFTYNXT50"],
+        "SENSEX": ["SENSEX", "BSE SENSEX"],
+        "SENSEX50": ["SENSEX50", "BSE SENSEX 50"],
         "Nifty 100": ["Nifty 100"],
         "Nifty 500": ["Nifty 500"],
         "Nifty IT": ["Nifty IT"],

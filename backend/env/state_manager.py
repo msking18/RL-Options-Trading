@@ -33,6 +33,11 @@ class TradingStateManager:
         self.pos_peak_pnl = np.zeros(self.num_symbols, dtype=np.float32)
         self.pos_entry_time = np.zeros(self.num_symbols, dtype=np.int32)
         
+        # SL/TP and Expiry Tracking
+        self.pos_expiry_index = np.zeros(self.num_symbols, dtype=np.int8)
+        self.pos_sl_price = np.zeros(self.num_symbols, dtype=np.float32)
+        self.pos_tp_price = np.zeros(self.num_symbols, dtype=np.float32)
+        
         self.reset()
 
     def reset(self):
@@ -48,8 +53,12 @@ class TradingStateManager:
         self.pos_hold_dur.fill(0)
         self.pos_peak_pnl.fill(0.0)
         self.pos_entry_time.fill(0)
+        self.pos_expiry_index.fill(0)
+        self.pos_sl_price.fill(0.0)
+        self.pos_tp_price.fill(0.0)
 
-    def enter_position(self, symbol: str, pos_type: str, option_price: float, index_price: float, quantity: int = 1):
+    def enter_position(self, symbol: str, pos_type: str, option_price: float, index_price: float, 
+                      quantity: int = 1, sl_pct: float = 0.0, tp_pct: float = 0.0, expiry_idx: int = 0):
         idx = self.symbol_to_idx.get(symbol)
         if idx is None or self.pos_type[idx] != self.TYPE_NONE:
             return False
@@ -67,6 +76,18 @@ class TradingStateManager:
         self.pos_curr_value[idx] = option_price * quantity
         self.pos_peak_pnl[idx] = 0.0
         self.pos_entry_time[idx] = getattr(self, 'current_step', 0)
+        self.pos_expiry_index[idx] = expiry_idx
+        
+        # Calculate SL/TP prices relative to execution_price
+        if sl_pct > 0:
+            self.pos_sl_price[idx] = execution_price * (1 - sl_pct)
+        else:
+            self.pos_sl_price[idx] = 0.0
+            
+        if tp_pct > 0:
+            self.pos_tp_price[idx] = execution_price * (1 + tp_pct)
+        else:
+            self.pos_tp_price[idx] = 0.0
         
         self.cash_balance -= total_cost
         return True
@@ -77,6 +98,74 @@ class TradingStateManager:
             if hold_duration <= max_dur:
                 return self.fixed_commission * multiplier
         return self.fixed_commission * COMMISSION_TIER_DEFAULT
+
+    def get_bulk_exit_commissions(self, hold_durations: np.ndarray) -> np.ndarray:
+        """Vectorized version of graduated commission logic."""
+        commissions = np.full_like(hold_durations, self.fixed_commission * COMMISSION_TIER_DEFAULT, dtype=np.float32)
+        # Apply tiers in reverse to ensure the lowest valid multiplier is applied correctly
+        # or just iterate through tiers (there are only 3-4 tiers usually)
+        for max_dur, multiplier in reversed(COMMISSION_TIERS):
+            commissions[hold_durations <= max_dur] = self.fixed_commission * multiplier
+        return commissions
+
+    def bulk_exit(self, indices: np.ndarray, current_option_prices: np.ndarray, extra_info: dict = None):
+        """
+        Processes multiple liquidations in a single vectorized pass.
+        Eliminates the Python for-loop overhead for SL/TP and Expiry hits.
+        """
+        if len(indices) == 0:
+            return 0.0
+
+        quantities = self.pos_qty[indices]
+        execution_prices = current_option_prices * (1 - self.slippage_pct)
+        hold_durs = self.pos_hold_dur[indices]
+        
+        exit_commissions = self.get_bulk_exit_commissions(hold_durs)
+        entry_commissions = np.full_like(indices, self.fixed_commission, dtype=np.float32)
+        
+        exit_proceeds = (execution_prices * quantities) - exit_commissions
+        entry_costs = (self.pos_entry_price[indices] * quantities) + entry_commissions
+        realized_pnls = exit_proceeds - entry_costs
+        
+        self.cash_balance += np.sum(exit_proceeds)
+        self.total_pnl += np.sum(realized_pnls)
+        
+        # Logging (We still need to append to trade_logs, which is a list. 
+        # This is the only slow part left, but it's only called on exits)
+        curr_step = getattr(self, 'current_step', 0)
+        for i, idx in enumerate(indices):
+            sym = self.symbols[idx]
+            entry_val = float(self.pos_entry_price[idx] * quantities[i])
+            log_entry = {
+                'symbol': sym,
+                'type': self.INV_TYPE_MAP[self.pos_type[idx]],
+                'quantity': int(quantities[i]),
+                'entry_time': int(self.pos_entry_time[idx]),
+                'exit_time': int(curr_step),
+                'hold_duration': int(hold_durs[i]),
+                'entry_price': float(self.pos_entry_price[idx]),
+                'exit_price': float(execution_prices[i]),
+                'pnl': float(realized_pnls[i]),
+                'pnl_pct': float(realized_pnls[i] / entry_val) if entry_val > 0 else 0.0,
+                'commission_exit': float(exit_commissions[i])
+            }
+            if extra_info:
+                log_entry.update(extra_info)
+            self.trade_logs.append(log_entry)
+
+        # Vectorized Reset
+        self.pos_type[indices] = self.TYPE_NONE
+        self.pos_qty[indices] = 0
+        self.pos_entry_price[indices] = 0.0
+        self.pos_hold_dur[indices] = 0
+        self.pos_curr_value[indices] = 0.0
+        self.pos_peak_pnl[indices] = 0.0
+        self.pos_expiry_index[indices] = 0
+        self.pos_sl_price[indices] = 0.0
+        self.pos_tp_price[indices] = 0.0
+        
+        self._update_total_capital()
+        return np.sum(realized_pnls)
 
     def exit_position(self, symbol: str, current_option_price: float, extra_info: dict = None):
         idx = self.symbol_to_idx.get(symbol)
@@ -124,6 +213,9 @@ class TradingStateManager:
         self.pos_hold_dur[idx] = 0
         self.pos_curr_value[idx] = 0.0
         self.pos_peak_pnl[idx] = 0.0
+        self.pos_expiry_index[idx] = 0
+        self.pos_sl_price[idx] = 0.0
+        self.pos_tp_price[idx] = 0.0
         
         self._update_total_capital()
         return realized_pnl
@@ -156,12 +248,16 @@ class TradingStateManager:
     def close_all_positions(self, current_option_prices: Dict[str, float]):
         """
         Forcefully exit all open positions at the current provided prices.
+        Now uses bulk_exit for speed.
         """
-        for symbol in self.symbols:
-            idx = self.symbol_to_idx[symbol]
-            if self.pos_type[idx] != self.TYPE_NONE:
-                price = current_option_prices.get(symbol, self.pos_curr_value[idx] / self.pos_qty[idx])
-                self.exit_position(symbol, price)
+        open_mask = (self.pos_type != self.TYPE_NONE)
+        if not np.any(open_mask):
+            return
+            
+        indices = np.where(open_mask)[0]
+        prices = np.array([current_option_prices.get(self.symbols[idx], self.pos_curr_value[idx] / self.pos_qty[idx]) for idx in indices])
+        
+        self.bulk_exit(indices, prices)
 
     # Backward compatibility properties for TradingEnv's current _get_obs (temporary)
     @property

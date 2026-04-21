@@ -43,7 +43,7 @@ class HyperparameterAnnealingCallback(BaseCallback):
 def mask_fn(env):
     return env.action_masks()
 
-def make_env(symbols, lookback_window, initial_capital, slippage, rank, seed=0, preloaded_data=None, min_symbols=5, max_symbols=10, total_slots=10, fixed_commission=0.0, preloaded_tensor=None, col_to_idx=None, start_date=None, end_date=None):
+def make_env(symbols, lookback_window, initial_capital, slippage, rank, seed=0, preloaded_data=None, min_symbols=5, max_symbols=6, total_slots=6, fixed_commission=0.0, preloaded_tensor=None, col_to_idx=None, start_date=None, end_date=None):
     """
     Utility function for multiprocessed env.
     """
