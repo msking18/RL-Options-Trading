@@ -16,7 +16,7 @@ TOTAL_SLOTS = 6
 FIXED_COMMISSION = 20.0 # Per order side (Upstox)
 
 # --- Reward Tuning ---
-PATIENCE_BONUS = 0.0001         # Per-step bonus for holding flat (no position, chose Hold)
+PATIENCE_BONUS = 0.0005         # Per-step bonus for holding flat (no position, chose Hold)
 DRAWDOWN_THRESHOLD_SOFT = 0.06   # Early warning DD penalty (6%)
 DRAWDOWN_THRESHOLD_HARD = 0.12   # Severe exit-forcing DD penalty (12%)
 SOFT_PENALTY_SCALE = 0.5         # Gentle slope for soft penalty
@@ -27,10 +27,10 @@ PENNY_THRESHOLD = 2.0           # Threshold for junk option detection
 # Graduated commission tiers: {max_hold_duration: multiplier}
 # Scalps (1 step) pay 5× base, long holds (10+) pay 0.5× base
 COMMISSION_TIERS = [
-    (1, 3.5),    # 1 step   → 3.5× commission (Penalize scalps harder)
-    (2, 1.5),    # 2 steps  → 1.5× commission
-    (4, 1.0),    # 3-4 steps → 1× commission (base)
-    (9, 0.5),    # 5-9 steps → 0.5× commission
+    (1, 7.0),    # 1 step   → 7.0× commission (Penalize scalps harder)
+    (2, 3.0),    # 2 steps  → 3.0× commission
+    (4, 1.5),    # 3-4 steps → 1.5× commission
+    (9, 1.0),    # 5-9 steps → 1.0× commission
 ]
 COMMISSION_TIER_DEFAULT = 0.5    # 10+ steps → 0.5× commission
 
@@ -39,7 +39,7 @@ VOL_SCALE_HIGH_THRESHOLD = 0.40   # Above this vol → 50% size
 VOL_SCALE_MED_THRESHOLD = 0.25    # Above this vol → 75% size
 
 # --- Minimum Hold Period ---
-MIN_HOLD_STEPS = 0               # No hard limit, rely on commissions
+MIN_HOLD_STEPS = 3               # Minimum steps before discretionary exit is allowed
 
 USE_CNN = True         # Toggle for 1D-CNN vs MlpPolicy
 

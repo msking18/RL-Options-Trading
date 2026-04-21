@@ -11,7 +11,8 @@ from backend.db.local_db_manager import LocalDBManager
 from backend.train.ppo_config import (
     INITIAL_CAPITAL, PATIENCE_BONUS, DRAWDOWN_THRESHOLD_SOFT,
     DRAWDOWN_THRESHOLD_HARD, SOFT_PENALTY_SCALE, HARD_PENALTY_SCALE,
-    VOL_SCALE_HIGH_THRESHOLD, VOL_SCALE_MED_THRESHOLD, SL_TP_CATEGORIES
+    VOL_SCALE_HIGH_THRESHOLD, VOL_SCALE_MED_THRESHOLD, SL_TP_CATEGORIES,
+    MIN_HOLD_STEPS
 )
 
 class TradingEnv(gym.Env):
@@ -559,14 +560,16 @@ class TradingEnv(gym.Env):
             
         active_sym_idxs = np.array([self.slot_to_idx[i] for i in active_indices])
         pos_types = self.state_manager.pos_type[active_sym_idxs]
+        pos_durations = self.state_manager.pos_hold_dur[active_sym_idxs]
         
         # Action dim: 0:Hold, 1:Buy Call, 2:Buy Put, 3:Exit
         flat = (pos_types == 0)
         m[active_indices[flat], 1] = True
         m[active_indices[flat], 2] = True
         
-        in_pos = (pos_types > 0)
-        m[active_indices[in_pos], 3] = True
+        # Exit (3) is valid only if in position AND hold duration >= MIN_HOLD_STEPS
+        in_pos_ready = (pos_types > 0) & (pos_durations >= MIN_HOLD_STEPS)
+        m[active_indices[in_pos_ready], 3] = True
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
