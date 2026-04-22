@@ -38,6 +38,9 @@ class TradingStateManager:
         self.pos_sl_price = np.zeros(self.num_symbols, dtype=np.float32)
         self.pos_tp_price = np.zeros(self.num_symbols, dtype=np.float32)
         
+        # Daily trade tracking
+        self.trades_today = np.zeros(self.num_symbols, dtype=np.int32)
+        
         self.reset()
 
     def reset(self):
@@ -56,6 +59,7 @@ class TradingStateManager:
         self.pos_expiry_index.fill(0)
         self.pos_sl_price.fill(0.0)
         self.pos_tp_price.fill(0.0)
+        self.trades_today.fill(0)
 
     def enter_position(self, symbol: str, pos_type: str, option_price: float, index_price: float, 
                       quantity: int = 1, sl_pct: float = 0.0, tp_pct: float = 0.0, expiry_idx: int = 0):
@@ -90,6 +94,7 @@ class TradingStateManager:
             self.pos_tp_price[idx] = 0.0
         
         self.cash_balance -= total_cost
+        self.trades_today[idx] += 1
         return True
 
     def _get_exit_commission(self, hold_duration: int) -> float:
@@ -223,6 +228,10 @@ class TradingStateManager:
     def _update_total_capital(self):
         """Ultra-fast vectorized capital summation."""
         self.total_capital = self.cash_balance + np.sum(self.pos_curr_value)
+
+    def reset_daily_stats(self):
+        """Resets daily limits and tracking."""
+        self.trades_today.fill(0)
 
     def get_state_vector(self) -> np.ndarray:
         """

@@ -24,6 +24,7 @@ HARD_PENALTY_SCALE = 2.0         # Sharp slope for hard penalty
 PENNY_JUNK_PENALTY = 0.005      # Penalty for trades < ₹2.0 on expiry day
 PENNY_THRESHOLD = 5.0           # Threshold for junk option detection
 MIN_OPTION_PRICE = 5.0          # Minimum price to allow trade entry
+ENTRY_PENALTY = 0.0002          # Flat reward penalty on trade entry
 
 # Graduated commission tiers: {max_hold_duration: multiplier}
 # Scalps (1 step) pay 5× base, long holds (10+) pay 0.5× base
@@ -41,6 +42,7 @@ VOL_SCALE_MED_THRESHOLD = 0.25    # Above this vol → 75% size
 
 # --- Minimum Hold Period ---
 MIN_HOLD_STEPS = 3               # Minimum steps before discretionary exit is allowed
+MAX_TRADES_PER_DAY = 5          # Hard limit on trade entries per symbol per day
 
 USE_CNN = True         # Toggle for 1D-CNN vs MlpPolicy
 

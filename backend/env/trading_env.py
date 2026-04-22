@@ -12,7 +12,7 @@ from backend.train.ppo_config import (
     INITIAL_CAPITAL, PATIENCE_BONUS, DRAWDOWN_THRESHOLD_SOFT,
     DRAWDOWN_THRESHOLD_HARD, SOFT_PENALTY_SCALE, HARD_PENALTY_SCALE,
     VOL_SCALE_HIGH_THRESHOLD, VOL_SCALE_MED_THRESHOLD, SL_TP_CATEGORIES,
-    MIN_HOLD_STEPS, MIN_OPTION_PRICE
+    MIN_HOLD_STEPS, MIN_OPTION_PRICE, ENTRY_PENALTY, MAX_TRADES_PER_DAY
 )
 
 class TradingEnv(gym.Env):
@@ -563,17 +563,19 @@ class TradingEnv(gym.Env):
         pos_durations = self.state_manager.pos_hold_dur[active_sym_idxs]
         
         # Action dim: 0:Hold, 1:Buy Call, 2:Buy Put, 3:Exit
-        # Entry (1, 2) is valid only if flat AND option price >= MIN_OPTION_PRICE
+        # Entry (1, 2) is valid only if:
+        # 1. Slot is flat
+        # 2. Option price >= MIN_OPTION_PRICE
+        # 3. Daily trade limit for symbol not reached
         flat = (pos_types == 0)
+        under_limit = self.state_manager.trades_today[active_sym_idxs] < MAX_TRADES_PER_DAY
         
         # Check current option prices for current week (e0)
-        # curr_data index for e0_call is self.idx_call_e0, e0_put is self.idx_call_e0 + 1
-        # curr_data was extracted for active_sym_idxs at self.current_step
         call_prices = self.data_tensor[active_sym_idxs, self.current_step, self.idx_call_e0]
         put_prices = self.data_tensor[active_sym_idxs, self.current_step, self.idx_call_e0 + 1]
         
-        m[active_indices[flat & (call_prices >= MIN_OPTION_PRICE)], 1] = True
-        m[active_indices[flat & (put_prices >= MIN_OPTION_PRICE)], 2] = True
+        m[active_indices[flat & under_limit & (call_prices >= MIN_OPTION_PRICE)], 1] = True
+        m[active_indices[flat & under_limit & (put_prices >= MIN_OPTION_PRICE)], 2] = True
         
         # Exit (3) is valid only if in position AND hold duration >= MIN_HOLD_STEPS
         in_pos_ready = (pos_types > 0) & (pos_durations >= MIN_HOLD_STEPS)
@@ -613,6 +615,14 @@ class TradingEnv(gym.Env):
         prev_capital = self.state_manager.total_capital
         self.state_manager.current_step = self.current_step
         
+        # 0. Daily Reset Check (DOW change detects start of new day)
+        if self.current_step > self.lookback_window:
+            prev_dow = self.data_tensor[0, self.current_step - 1, self.idx_dow]
+            curr_dow = self.data_tensor[0, self.current_step, self.idx_dow]
+            if curr_dow != prev_dow:
+                # print(f"[DEBUG] Day Change detected at step {self.current_step}: {prev_dow} -> {curr_dow}")
+                self.state_manager.reset_daily_stats()
+        
         # Map flat actions back to per-slot [total_slots, 2]
         action_matrix = actions.reshape(self.total_slots, 2)
         
@@ -623,6 +633,10 @@ class TradingEnv(gym.Env):
             active_sym_idxs = np.array([self.slot_to_idx[i] for i in active_indices])
             curr_data = self.data_tensor[active_sym_idxs, self.current_step]
             
+            # Fetch current masks for these slots
+            m = self.action_masks().reshape(self.total_slots, -1)
+            active_masks = m[active_indices]
+            
             # Universal contextual info for trade logs
             first_idx = active_sym_idxs[0]
             extra_info = {
@@ -631,7 +645,7 @@ class TradingEnv(gym.Env):
                 'max_impact': int(self.data_tensor[first_idx, self.current_step, self.idx_max_impact])
             }
             
-            exits = (slot_actions[:, 0] == 3) & (self.state_manager.pos_type[active_sym_idxs] > 0)
+            exits = (slot_actions[:, 0] == 3) & active_masks[:, 3]
             
             if np.any(exits):
                 exit_indices = active_sym_idxs[exits]
@@ -651,10 +665,11 @@ class TradingEnv(gym.Env):
                 
                 self.state_manager.bulk_exit(exit_indices, exit_prices, extra_info=extra_info)
             
-            # Enters (Action 1: Buy Call, 2: Buy Put)
-            buy_calls = (slot_actions[:, 0] == 1) & (self.state_manager.pos_type[active_sym_idxs] == 0)
-            buy_puts = (slot_actions[:, 0] == 2) & (self.state_manager.pos_type[active_sym_idxs] == 0)
+            # Enters (Action 1: Buy Call, 2: Buy Put) - MUST respect masks
+            buy_calls = (slot_actions[:, 0] == 1) & active_masks[:, 1]
+            buy_puts = (slot_actions[:, 0] == 2) & active_masks[:, 2]
             
+            num_entries = 0
             for i in np.where(buy_calls | buy_puts)[0]:
                 sym = self.slot_to_symbol[active_indices[i]]
                 e_idx = 0 # Forced restriction to Current Week
@@ -669,9 +684,11 @@ class TradingEnv(gym.Env):
                 col = self.idx_call_e0 # e_idx 0
                 if buy_puts[i]: col += 1
                 
-                self.state_manager.enter_position(sym, 'LONG_CALL' if buy_calls[i] else 'LONG_PUT',
+                success = self.state_manager.enter_position(sym, 'LONG_CALL' if buy_calls[i] else 'LONG_PUT',
                                                curr_data[i, col], curr_data[i, self.idx_close],
                                                quantity=lot_size, sl_pct=sl_pct, tp_pct=tp_pct, expiry_idx=e_idx)
+                if success:
+                    num_entries += 1
 
         # 2. Transition
         self.current_step += 1
@@ -769,6 +786,10 @@ class TradingEnv(gym.Env):
         # 4. Reward Logic
         reward = (new_capital - prev_capital) / self.initial_capital
         reward -= total_penalty
+        
+        # Apply entry penalties if any new positions were opened
+        if 'num_entries' in locals() and num_entries > 0:
+            reward -= num_entries * ENTRY_PENALTY
         
         # Patience bonus: reward flat holds (active slot, no position, chose Hold)
         if len(active_indices) > 0:
