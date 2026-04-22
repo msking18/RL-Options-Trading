@@ -12,7 +12,7 @@ TOTAL_TIMESTEPS = 5_000_000 # Increased for vectorized environment depth
 INITIAL_CAPITAL = 1_000_000.0
 MIN_SYMBOLS = 5
 MAX_SYMBOLS = 6
-TOTAL_SLOTS = 6
+TOTAL_SLOTS = 10
 FIXED_COMMISSION = 20.0 # Per order side (Upstox)
 
 # --- Reward Tuning ---

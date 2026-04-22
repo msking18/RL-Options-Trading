@@ -1,6 +1,6 @@
 import numpy as np
 from typing import Dict, Optional, List
-from backend.train.ppo_config import COMMISSION_TIERS, COMMISSION_TIER_DEFAULT, MIN_OPTION_PRICE
+from backend.train.ppo_config import COMMISSION_TIERS, COMMISSION_TIER_DEFAULT, MIN_OPTION_PRICE, MAX_TRADES_PER_DAY
 
 class TradingStateManager:
     """
@@ -65,6 +65,11 @@ class TradingStateManager:
                       quantity: int = 1, sl_pct: float = 0.0, tp_pct: float = 0.0, expiry_idx: int = 0):
         idx = self.symbol_to_idx.get(symbol)
         if idx is None or self.pos_type[idx] != self.TYPE_NONE or option_price < MIN_OPTION_PRICE:
+            return False
+            
+        # Hard Daily Trade Limit Enforcement
+        if self.trades_today[idx] >= MAX_TRADES_PER_DAY:
+            print(f"DEBUG: Trade entry blocked for {symbol}: Max trades ({MAX_TRADES_PER_DAY}) reached today.")
             return False
             
         execution_price = option_price * (1 + self.slippage_pct)

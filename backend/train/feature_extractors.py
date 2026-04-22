@@ -13,7 +13,8 @@ class Trading1DCNN(BaseFeaturesExtractor):
         self.lookback_window = lookback_window
         self.total_slots = total_slots
         self.ohlcv_size = lookback_window * 6
-        self.static_per_symbol_size = (5 * 4) + 3 + 5 # Greeks + Portfolio + Technicals
+        # Matches TradingEnv: (2*5*4) Greeks + (2*2) Prices + 3 Pos + 5 Tech + 3 Temp + 2 Risk = 57
+        self.static_per_symbol_size = 57 
         self.per_symbol_segment_size = self.ohlcv_size + self.static_per_symbol_size
         
         # 1D CNN for OHLCV data

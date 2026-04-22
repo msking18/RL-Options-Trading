@@ -55,8 +55,7 @@ class TradingEnv(gym.Env):
         self.end_date = pd.to_datetime(end_date) if end_date else None
         
         self.db_manager = HistoricalDBManager()
-        # Initialize state manager with ALL symbols (it handles positions internally)
-        self.state_manager = TradingStateManager(self.symbols, initial_capital, slippage, fixed_commission)
+        # State manager will be initialized later once symbol_list is finalized
         
         # Define fixed list of external features to ensure consistent observation space
         self.external_features_cols = [
@@ -202,6 +201,9 @@ class TradingEnv(gym.Env):
         # Pre-allocate Action Mask (MultiDiscrete total_slots * 8)
         # Dimensions: 4 (Action) + 4 (Risk) = 8 per slot
         self.action_mask_buf = np.zeros(self.total_slots * (4 + len(SL_TP_CATEGORIES)), dtype=bool)
+        
+        # Finalize State Manager with the actual loaded symbol list to ensure correct indexing
+        self.state_manager = TradingStateManager(self.symbol_list, initial_capital, slippage, fixed_commission)
         
         self.reset()
         for i in range(self.total_slots):
@@ -620,7 +622,7 @@ class TradingEnv(gym.Env):
             prev_dow = self.data_tensor[0, self.current_step - 1, self.idx_dow]
             curr_dow = self.data_tensor[0, self.current_step, self.idx_dow]
             if curr_dow != prev_dow:
-                # print(f"[DEBUG] Day Change detected at step {self.current_step}: {prev_dow} -> {curr_dow}")
+                print(f"[DEBUG] Day Change detected at step {self.current_step}: {prev_dow} -> {curr_dow}")
                 self.state_manager.reset_daily_stats()
         
         # Map flat actions back to per-slot [total_slots, 2]
@@ -689,6 +691,10 @@ class TradingEnv(gym.Env):
                                                quantity=lot_size, sl_pct=sl_pct, tp_pct=tp_pct, expiry_idx=e_idx)
                 if success:
                     num_entries += 1
+                else:
+                    # This might happen if mask was stale or state_manager hard limit reached
+                    # print(f"[DEBUG] Trade entry failed for {sym} at step {self.current_step}")
+                    pass
 
         # 2. Transition
         self.current_step += 1
