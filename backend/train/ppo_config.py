@@ -22,7 +22,8 @@ DRAWDOWN_THRESHOLD_HARD = 0.12   # Severe exit-forcing DD penalty (12%)
 SOFT_PENALTY_SCALE = 0.5         # Gentle slope for soft penalty
 HARD_PENALTY_SCALE = 2.0         # Sharp slope for hard penalty
 PENNY_JUNK_PENALTY = 0.005      # Penalty for trades < ₹2.0 on expiry day
-PENNY_THRESHOLD = 2.0           # Threshold for junk option detection
+PENNY_THRESHOLD = 5.0           # Threshold for junk option detection
+MIN_OPTION_PRICE = 5.0          # Minimum price to allow trade entry
 
 # Graduated commission tiers: {max_hold_duration: multiplier}
 # Scalps (1 step) pay 5× base, long holds (10+) pay 0.5× base

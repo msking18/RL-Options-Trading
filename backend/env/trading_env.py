@@ -12,7 +12,7 @@ from backend.train.ppo_config import (
     INITIAL_CAPITAL, PATIENCE_BONUS, DRAWDOWN_THRESHOLD_SOFT,
     DRAWDOWN_THRESHOLD_HARD, SOFT_PENALTY_SCALE, HARD_PENALTY_SCALE,
     VOL_SCALE_HIGH_THRESHOLD, VOL_SCALE_MED_THRESHOLD, SL_TP_CATEGORIES,
-    MIN_HOLD_STEPS
+    MIN_HOLD_STEPS, MIN_OPTION_PRICE
 )
 
 class TradingEnv(gym.Env):
@@ -563,9 +563,17 @@ class TradingEnv(gym.Env):
         pos_durations = self.state_manager.pos_hold_dur[active_sym_idxs]
         
         # Action dim: 0:Hold, 1:Buy Call, 2:Buy Put, 3:Exit
+        # Entry (1, 2) is valid only if flat AND option price >= MIN_OPTION_PRICE
         flat = (pos_types == 0)
-        m[active_indices[flat], 1] = True
-        m[active_indices[flat], 2] = True
+        
+        # Check current option prices for current week (e0)
+        # curr_data index for e0_call is self.idx_call_e0, e0_put is self.idx_call_e0 + 1
+        # curr_data was extracted for active_sym_idxs at self.current_step
+        call_prices = self.data_tensor[active_sym_idxs, self.current_step, self.idx_call_e0]
+        put_prices = self.data_tensor[active_sym_idxs, self.current_step, self.idx_call_e0 + 1]
+        
+        m[active_indices[flat & (call_prices >= MIN_OPTION_PRICE)], 1] = True
+        m[active_indices[flat & (put_prices >= MIN_OPTION_PRICE)], 2] = True
         
         # Exit (3) is valid only if in position AND hold duration >= MIN_HOLD_STEPS
         in_pos_ready = (pos_types > 0) & (pos_durations >= MIN_HOLD_STEPS)

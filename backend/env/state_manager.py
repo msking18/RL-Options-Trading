@@ -1,6 +1,6 @@
 import numpy as np
 from typing import Dict, Optional, List
-from backend.train.ppo_config import COMMISSION_TIERS, COMMISSION_TIER_DEFAULT
+from backend.train.ppo_config import COMMISSION_TIERS, COMMISSION_TIER_DEFAULT, MIN_OPTION_PRICE
 
 class TradingStateManager:
     """
@@ -60,7 +60,7 @@ class TradingStateManager:
     def enter_position(self, symbol: str, pos_type: str, option_price: float, index_price: float, 
                       quantity: int = 1, sl_pct: float = 0.0, tp_pct: float = 0.0, expiry_idx: int = 0):
         idx = self.symbol_to_idx.get(symbol)
-        if idx is None or self.pos_type[idx] != self.TYPE_NONE:
+        if idx is None or self.pos_type[idx] != self.TYPE_NONE or option_price < MIN_OPTION_PRICE:
             return False
             
         execution_price = option_price * (1 + self.slippage_pct)
