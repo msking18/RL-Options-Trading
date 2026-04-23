@@ -40,6 +40,40 @@ class HyperparameterAnnealingCallback(BaseCallback):
         
         return True
 
+class TradeDebugCallback(BaseCallback):
+    """
+    Logs trade-specific metrics (SL hit rate, TP hit rate, avg duration) 
+    to TensorBoard from the environment info.
+    """
+    def __init__(self, verbose=0):
+        super(TradeDebugCallback, self).__init__(verbose)
+
+    def _on_step(self) -> bool:
+        # Check if any environment finished an episode (info['trade_logs'] is present)
+        for info in self.locals.get("infos", []):
+            if "trade_logs" in info:
+                logs = info["trade_logs"]
+                if not logs:
+                    continue
+                
+                # Extract metrics from trade logs
+                sl_hits = sum(1 for log in logs if log.get('sl_tp_hit') and log.get('is_sl'))
+                tp_hits = sum(1 for log in logs if log.get('sl_tp_hit') and log.get('is_tp'))
+                total_trades = len(logs)
+                durations = [log['hold_duration'] for log in logs]
+                
+                if total_trades > 0:
+                    sl_rate = sl_hits / total_trades
+                    tp_rate = tp_hits / total_trades
+                    avg_dur = sum(durations) / total_trades
+                    
+                    self.logger.record("debug/sl_hit_rate", sl_rate)
+                    self.logger.record("debug/tp_hit_rate", tp_rate)
+                    self.logger.record("debug/avg_hold_duration", avg_dur)
+                    self.logger.record("debug/total_trades_per_episode", total_trades)
+        
+        return True
+
 def mask_fn(env):
     return env.action_masks()
 
@@ -165,10 +199,13 @@ def train():
         total_timesteps=args.total_timesteps,
         progress_bar=True,
         tb_log_name=f"PPO_Portfolio_{timestamp}",
-        callback=[HyperparameterAnnealingCallback(
-            initial_lr=params.get('learning_rate', 3e-4),
-            initial_ent=params.get('ent_coef', 0.01)
-        )]
+        callback=[
+            HyperparameterAnnealingCallback(
+                initial_lr=params.get('learning_rate', 3e-4),
+                initial_ent=params.get('ent_coef', 0.01)
+            ),
+            TradeDebugCallback()
+        ]
     )
     
     model_path = os.path.join(MODEL_DIR, f"ppo_model_{timestamp}.zip")

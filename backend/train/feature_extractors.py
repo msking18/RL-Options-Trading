@@ -7,7 +7,7 @@ class Trading1DCNN(BaseFeaturesExtractor):
     Custom Feature Extractor for Trading Environment that uses 1D Convolutions
     over the lookback window for each symbol slot.
     """
-    def __init__(self, observation_space, features_dim=512, lookback_window=30, total_slots=10):
+    def __init__(self, observation_space, features_dim=512, lookback_window=30, total_slots=6):
         super().__init__(observation_space, features_dim)
         
         self.lookback_window = lookback_window

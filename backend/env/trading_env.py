@@ -3,6 +3,7 @@ from gymnasium import spaces
 import numpy as np
 import pandas as pd
 from typing import Optional, Union, List, Dict
+from datetime import datetime
 
 from backend.env.state_manager import TradingStateManager
 from data.pipelines.db_manager import HistoricalDBManager
@@ -32,8 +33,8 @@ class TradingEnv(gym.Env):
         end_date: Optional[str] = None,
         preloaded_data: Optional[Dict[str, pd.DataFrame]] = None,
         min_active_symbols: int = 5,
-        max_active_symbols: int = 10,
-        total_slots: int = 10,
+        max_active_symbols: int = 6,
+        total_slots: int = 6,
         fixed_commission: float = 0.0,
         preloaded_tensor: Optional[np.ndarray] = None,
         col_to_idx: Optional[Dict[str, int]] = None
@@ -107,7 +108,7 @@ class TradingEnv(gym.Env):
             self.symbol_to_idx = {sym: i for i, sym in enumerate(self.symbol_list)}
             
             # Determine all columns to be included in the tensor
-            ohlcv_cols = ['open', 'high', 'low', 'close', 'volume', 'oi', 'dte_0', 'day_of_week', 'is_expiry_day']
+            ohlcv_cols = ['open', 'high', 'low', 'close', 'volume', 'oi', 'dte_0', 'day_of_week', 'is_expiry_day', 'timestamp']
             greek_cols = []
             for e in [0, 1]:
                 for i in range(-2, 3):
@@ -149,6 +150,7 @@ class TradingEnv(gym.Env):
         self.idx_dte = self.col_to_idx['dte_0']
         self.idx_dow = self.col_to_idx['day_of_week']
         self.idx_is_expiry = self.col_to_idx['is_expiry_day']
+        self.idx_timestamp = self.col_to_idx['timestamp']
 
         self.idx_rsi = self.col_to_idx['RSI']
         self.idx_atr = self.col_to_idx['ATR']
@@ -161,6 +163,15 @@ class TradingEnv(gym.Env):
         self.idx_put_e0 = self.col_to_idx['e0_put_price']
         self.idx_call_e1 = self.col_to_idx['e1_call_price']
         self.idx_put_e1 = self.col_to_idx['e1_put_price']
+
+        # Cache Greek indices dynamically to avoid hardcoded offsets
+        self.idx_greeks = {}
+        for e in [0, 1]:
+            for s in range(-2, 3):
+                for g in ['delta', 'gamma', 'theta', 'vega']:
+                    col_name = f'e{e}_s{s}_{g}'
+                    if col_name in self.col_to_idx:
+                        self.idx_greeks[(e, s, g)] = self.col_to_idx[col_name]
 
         self.idx_ext_start = self.col_to_idx[self.external_features_cols[0]]
         self.idx_max_impact = self.col_to_idx['Max_Impact']
@@ -380,6 +391,7 @@ class TradingEnv(gym.Env):
         df['dte_0'] = dtes_0
         df['day_of_week'] = parsed_times.dt.dayofweek.values.astype(float)
         df['is_expiry_day'] = (dtes_0 == 0).astype(float)
+        df['timestamp'] = parsed_times.values.astype('datetime64[s]').astype('int64') # Unix seconds
         
         atm_strike = np.round(spot / strike_step) * strike_step
         rate = 0.07
@@ -445,8 +457,8 @@ class TradingEnv(gym.Env):
             norm_oi = (np.log1p(windows[:, :, self.idx_oi]) / 20.0).reshape(len(active_slots), -1)
             
             # 3. Multi-Expiry Greeks (e0 and e1 - 40 features total)
-            # Greek columns follow OI in our tensor_cols definition
-            greeks_start = self.idx_oi + 4 # Skip dte, dow, is_expiry
+            # Greek columns follow timestamp in our tensor_cols definition
+            greeks_start = self.idx_timestamp + 1
             greeks = current_data[:, greeks_start : greeks_start + 40].copy()
             greeks[:, 1::4] *= 0.1  # Gamma scaling
             greeks[:, 2::4] *= 0.01 # Theta scaling
@@ -617,13 +629,20 @@ class TradingEnv(gym.Env):
         prev_capital = self.state_manager.total_capital
         self.state_manager.current_step = self.current_step
         
-        # 0. Daily Reset Check (DOW change detects start of new day)
+        # 0. Daily Reset Check (Timestamp-based date change detection)
+        # We use the timestamp at the current step to determine if we've crossed into a new day.
+        # This is more robust than DOW for intraday data where DOW only changes weekly.
         if self.current_step > self.lookback_window:
-            prev_dow = self.data_tensor[0, self.current_step - 1, self.idx_dow]
-            curr_dow = self.data_tensor[0, self.current_step, self.idx_dow]
-            if curr_dow != prev_dow:
-                print(f"[DEBUG] Day Change detected at step {self.current_step}: {prev_dow} -> {curr_dow}")
+            prev_ts = int(self.data_tensor[0, self.current_step - 1, self.idx_timestamp])
+            curr_ts = int(self.data_tensor[0, self.current_step, self.idx_timestamp])
+            
+            # Check if dates differ
+            if datetime.fromtimestamp(curr_ts).date() != datetime.fromtimestamp(prev_ts).date():
+                print(f"[DEBUG] Day Change detected at step {self.current_step}: {datetime.fromtimestamp(prev_ts).date()} -> {datetime.fromtimestamp(curr_ts).date()}")
                 self.state_manager.reset_daily_stats()
+        
+        # Universal timestamp for trade logs
+        current_timestamp = int(self.data_tensor[0, self.current_step, self.idx_timestamp])
         
         # Map flat actions back to per-slot [total_slots, 2]
         action_matrix = actions.reshape(self.total_slots, 2)
@@ -665,7 +684,7 @@ class TradingEnv(gym.Env):
                 rel_exits = np.where(exits)[0]
                 exit_prices = curr_data[rel_exits, exit_cols]
                 
-                self.state_manager.bulk_exit(exit_indices, exit_prices, extra_info=extra_info)
+                self.state_manager.bulk_exit(exit_indices, exit_prices, timestamp=current_timestamp, extra_info=extra_info)
             
             # Enters (Action 1: Buy Call, 2: Buy Put) - MUST respect masks
             buy_calls = (slot_actions[:, 0] == 1) & active_masks[:, 1]
@@ -688,7 +707,8 @@ class TradingEnv(gym.Env):
                 
                 success = self.state_manager.enter_position(sym, 'LONG_CALL' if buy_calls[i] else 'LONG_PUT',
                                                curr_data[i, col], curr_data[i, self.idx_close],
-                                               quantity=lot_size, sl_pct=sl_pct, tp_pct=tp_pct, expiry_idx=e_idx)
+                                               quantity=lot_size, sl_pct=sl_pct, tp_pct=tp_pct, expiry_idx=e_idx,
+                                               timestamp=current_timestamp)
                 if success:
                     num_entries += 1
                 else:
@@ -732,22 +752,23 @@ class TradingEnv(gym.Env):
             close_prices = np.where((e_indices == 1) & (p_types == 1), nxt_call_e1, close_prices)
             close_prices = np.where((e_indices == 1) & (p_types == 2), nxt_put_e1, close_prices)
             
-            # Approximate Low price of the option during the candle to check SL
-            # Option Low ≈ Current Close - (Spot Close - Spot Low) * Delta
-            # (Crude but survivable for 5m TF)
-            # Find Delta index: e{e}_s0_delta is at idx_oi + 4 + (e*20) + (0*4) = idx_oi + 4 + e*20
             p_deltas = np.zeros_like(p_types, dtype=np.float32)
             for j, e_val in enumerate([0, 1]):
                 mask_e = (e_indices == e_val)
                 if np.any(mask_e):
-                    # Index of s0_delta for expiry e_val
-                    delta_col = self.idx_oi + 4 + (e_val * 20)
+                    # Use dynamic lookup for s0_delta
+                    delta_col = self.idx_greeks.get((e_val, 0, 'delta'), self.idx_timestamp + 1 + (e_val * 20))
                     p_deltas[mask_e] = nxt_data[mask_e, delta_col]
             
             # Calls suffer when spot goes Low, Puts suffer when spot goes High
-            spot_move_against = np.where(p_types == 1, spot_prev_close - spot_low, spot_high - spot_prev_close)
+            # IMPORTANT: We measure distance from 'spot_close' (current candle's close)
+            # because 'close_prices' (current option prices) already reflect the move from prev_close.
+            # Using prev_close would double-count the delta move.
+            spot_move_against = np.where(p_types == 1, spot_close - spot_low, spot_high - spot_close)
             spot_move_against = np.maximum(0, spot_move_against)
-            opt_low_approx = close_prices - (spot_move_against * p_deltas)
+            
+            # Add a 1.05x safety buffer to the approximation to account for Gamma (delta curvature)
+            opt_low_approx = close_prices - (spot_move_against * p_deltas * 1.05)
             
             # Check for SL hits
             entries = self.state_manager.pos_entry_price[a_idx]
@@ -755,9 +776,9 @@ class TradingEnv(gym.Env):
             sl_hits = (sl_prices > 0) & (opt_low_approx <= sl_prices)
             
             # Check for TP hits (Approx Option High)
-            spot_move_favor = np.where(p_types == 1, spot_high - spot_prev_close, spot_prev_close - spot_low)
+            spot_move_favor = np.where(p_types == 1, spot_high - spot_close, spot_close - spot_low)
             spot_move_favor = np.maximum(0, spot_move_favor)
-            opt_high_approx = close_prices + (spot_move_favor * p_deltas)
+            opt_high_approx = close_prices + (spot_move_favor * p_deltas * 0.95) # 0.95x buffer (conservative)
             tp_prices = self.state_manager.pos_tp_price[a_idx]
             tp_hits = (tp_prices > 0) & (opt_high_approx >= tp_prices)
             
@@ -766,7 +787,14 @@ class TradingEnv(gym.Env):
             if len(hitter_indices) > 0:
                 exit_indices = a_idx[hitter_indices]
                 exit_prices = np.where(sl_hits[hitter_indices], sl_prices[hitter_indices], tp_prices[hitter_indices])
-                self.state_manager.bulk_exit(exit_indices, exit_prices, extra_info={'sl_tp_hit': True})
+                
+                # Metadata for tracking
+                hit_info = {
+                    'sl_tp_hit': True,
+                    'is_sl': sl_hits[hitter_indices].tolist(),
+                    'is_tp': tp_hits[hitter_indices].tolist()
+                }
+                self.state_manager.bulk_exit(exit_indices, exit_prices, timestamp=current_timestamp, extra_info=hit_info)
             
             # Remaining positions update curr_value
             remaining = ~ (sl_hits | tp_hits)
@@ -835,4 +863,4 @@ class TradingEnv(gym.Env):
             
             current_prices[sym] = float(self.data_tensor[i, idx, col])
             
-        self.state_manager.close_all_positions(current_prices)
+        self.state_manager.close_all_positions(current_prices, timestamp=int(self.data_tensor[0, idx, self.idx_timestamp]))

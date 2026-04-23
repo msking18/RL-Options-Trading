@@ -12,11 +12,11 @@ TOTAL_TIMESTEPS = 5_000_000 # Increased for vectorized environment depth
 INITIAL_CAPITAL = 1_000_000.0
 MIN_SYMBOLS = 5
 MAX_SYMBOLS = 6
-TOTAL_SLOTS = 10
+TOTAL_SLOTS = 6
 FIXED_COMMISSION = 20.0 # Per order side (Upstox)
 
 # --- Reward Tuning ---
-PATIENCE_BONUS = 0.0005         # Per-step bonus for holding flat (no position, chose Hold)
+PATIENCE_BONUS = 0.0002         # Per-step bonus for holding flat (no position, chose Hold)
 DRAWDOWN_THRESHOLD_SOFT = 0.06   # Early warning DD penalty (6%)
 DRAWDOWN_THRESHOLD_HARD = 0.12   # Severe exit-forcing DD penalty (12%)
 SOFT_PENALTY_SCALE = 0.5         # Gentle slope for soft penalty
@@ -27,10 +27,10 @@ MIN_OPTION_PRICE = 5.0          # Minimum price to allow trade entry
 ENTRY_PENALTY = 0.0002          # Flat reward penalty on trade entry
 
 # Graduated commission tiers: {max_hold_duration: multiplier}
-# Scalps (1 step) pay 5× base, long holds (10+) pay 0.5× base
+# Scalps (1 step) pay 4× base, long holds (10+) pay 0.5× base
 COMMISSION_TIERS = [
-    (1, 7.0),    # 1 step   → 7.0× commission (Penalize scalps harder)
-    (2, 3.0),    # 2 steps  → 3.0× commission
+    (1, 4.0),    # 1 step   → 4.0× commission (Less punitive exploration)
+    (2, 2.5),    # 2 steps  → 2.5× commission
     (4, 1.5),    # 3-4 steps → 1.5× commission
     (9, 1.0),    # 5-9 steps → 1.0× commission
 ]

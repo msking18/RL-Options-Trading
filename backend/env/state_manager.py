@@ -31,7 +31,7 @@ class TradingStateManager:
         self.pos_curr_value = np.zeros(self.num_symbols, dtype=np.float32)
         self.pos_hold_dur = np.zeros(self.num_symbols, dtype=np.int32)
         self.pos_peak_pnl = np.zeros(self.num_symbols, dtype=np.float32)
-        self.pos_entry_time = np.zeros(self.num_symbols, dtype=np.int32)
+        self.pos_entry_time = np.zeros(self.num_symbols, dtype=np.int64)
         
         # SL/TP and Expiry Tracking
         self.pos_expiry_index = np.zeros(self.num_symbols, dtype=np.int8)
@@ -62,7 +62,8 @@ class TradingStateManager:
         self.trades_today.fill(0)
 
     def enter_position(self, symbol: str, pos_type: str, option_price: float, index_price: float, 
-                      quantity: int = 1, sl_pct: float = 0.0, tp_pct: float = 0.0, expiry_idx: int = 0):
+                      quantity: int = 1, sl_pct: float = 0.0, tp_pct: float = 0.0, expiry_idx: int = 0,
+                      timestamp: int = 0):
         idx = self.symbol_to_idx.get(symbol)
         if idx is None or self.pos_type[idx] != self.TYPE_NONE or option_price < MIN_OPTION_PRICE:
             return False
@@ -84,7 +85,7 @@ class TradingStateManager:
         self.pos_hold_dur[idx] = 0
         self.pos_curr_value[idx] = option_price * quantity
         self.pos_peak_pnl[idx] = 0.0
-        self.pos_entry_time[idx] = getattr(self, 'current_step', 0)
+        self.pos_entry_time[idx] = timestamp
         self.pos_expiry_index[idx] = expiry_idx
         
         # Calculate SL/TP prices relative to execution_price
@@ -118,7 +119,8 @@ class TradingStateManager:
             commissions[hold_durations <= max_dur] = self.fixed_commission * multiplier
         return commissions
 
-    def bulk_exit(self, indices: np.ndarray, current_option_prices: np.ndarray, extra_info: dict = None):
+    def bulk_exit(self, indices: np.ndarray, current_option_prices: np.ndarray, 
+                  timestamp: int = 0, extra_info: dict = None):
         """
         Processes multiple liquidations in a single vectorized pass.
         Eliminates the Python for-loop overhead for SL/TP and Expiry hits.
@@ -151,7 +153,7 @@ class TradingStateManager:
                 'type': self.INV_TYPE_MAP[self.pos_type[idx]],
                 'quantity': int(quantities[i]),
                 'entry_time': int(self.pos_entry_time[idx]),
-                'exit_time': int(curr_step),
+                'exit_time': int(timestamp),
                 'hold_duration': int(hold_durs[i]),
                 'entry_price': float(self.pos_entry_price[idx]),
                 'exit_price': float(execution_prices[i]),
@@ -160,7 +162,12 @@ class TradingStateManager:
                 'commission_exit': float(exit_commissions[i])
             }
             if extra_info:
-                log_entry.update(extra_info)
+                # Distribute per-trade info if provided as a list/array of same length as indices
+                for k, v in extra_info.items():
+                    if isinstance(v, (list, np.ndarray)) and len(v) == len(indices):
+                        log_entry[k] = v[i]
+                    else:
+                        log_entry[k] = v
             self.trade_logs.append(log_entry)
 
         # Vectorized Reset
@@ -259,7 +266,7 @@ class TradingStateManager:
         
         return np.concatenate([global_state, symbol_features])
 
-    def close_all_positions(self, current_option_prices: Dict[str, float]):
+    def close_all_positions(self, current_option_prices: Dict[str, float], timestamp: int = 0):
         """
         Forcefully exit all open positions at the current provided prices.
         Now uses bulk_exit for speed.
@@ -271,7 +278,7 @@ class TradingStateManager:
         indices = np.where(open_mask)[0]
         prices = np.array([current_option_prices.get(self.symbols[idx], self.pos_curr_value[idx] / self.pos_qty[idx]) for idx in indices])
         
-        self.bulk_exit(indices, prices)
+        self.bulk_exit(indices, prices, timestamp=timestamp)
 
     # Backward compatibility properties for TradingEnv's current _get_obs (temporary)
     @property
