@@ -217,10 +217,6 @@ class TradingEnv(gym.Env):
         self.state_manager = TradingStateManager(self.symbol_list, initial_capital, slippage, fixed_commission)
         
         self.reset()
-        for i in range(self.total_slots):
-            start = 2 + (i * self.per_symbol_segment_size)
-            end = start + self.per_symbol_segment_size
-            self.slot_slices.append((start, end))
 
         
         # Track symbol-to-slot mapping and active mask for randomization
@@ -498,7 +494,8 @@ class TradingEnv(gym.Env):
                 # pnl_pct = (curr_val / qty - entry) / entry
                 pnl_pcts[valid_pos] = (curr_vals[valid_pos] / self.state_manager.pos_qty[active_sym_idxs][valid_pos] - entry_prices[valid_pos]) / entry_prices[valid_pos]
             
-            trailing_drawdowns = peak_pnls - pnl_pcts
+            pnl_pcts = np.clip(pnl_pcts, -2.0, 2.0)
+            trailing_drawdowns = np.clip(peak_pnls - pnl_pcts, 0.0, 2.0)
             
             # Construct Per-Symbol Feature Matrix for Fast Copying
             sym_features = np.zeros((len(active_slots), self.per_symbol_segment_size), dtype=np.float32)
@@ -534,8 +531,6 @@ class TradingEnv(gym.Env):
             
             # Write to buffer by slot
             for j, slot_i in enumerate(active_slots):
-                start, end = self.slot_slices[slot_i]
-                self.obs_buffer[start : end] = sym_features[j]
                 start, end = self.slot_slices[slot_i]
                 self.obs_buffer[start : end] = sym_features[j]
                 
@@ -768,17 +763,17 @@ class TradingEnv(gym.Env):
             spot_move_against = np.maximum(0, spot_move_against)
             
             # Add a 1.05x safety buffer to the approximation to account for Gamma (delta curvature)
-            opt_low_approx = close_prices - (spot_move_against * p_deltas * 1.05)
+            opt_low_approx = close_prices - (spot_move_against * p_deltas)
             
-            # Check for SL hits
+            # Check for SL hits (Removed 1.05x aggressive buffer)
             entries = self.state_manager.pos_entry_price[a_idx]
             sl_prices = self.state_manager.pos_sl_price[a_idx]
             sl_hits = (sl_prices > 0) & (opt_low_approx <= sl_prices)
             
-            # Check for TP hits (Approx Option High)
+            # Check for TP hits (Removed 0.95x aggressive buffer)
             spot_move_favor = np.where(p_types == 1, spot_high - spot_close, spot_close - spot_low)
             spot_move_favor = np.maximum(0, spot_move_favor)
-            opt_high_approx = close_prices + (spot_move_favor * p_deltas * 0.95) # 0.95x buffer (conservative)
+            opt_high_approx = close_prices + (spot_move_favor * p_deltas) 
             tp_prices = self.state_manager.pos_tp_price[a_idx]
             tp_hits = (tp_prices > 0) & (opt_high_approx >= tp_prices)
             

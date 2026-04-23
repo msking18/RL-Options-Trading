@@ -55,32 +55,36 @@ class Trading1DCNN(BaseFeaturesExtractor):
         
         # 1. Extract symbol segments
         # observations shape: [B, total_obs_size]
+        # Skip first 2 elements (Global Portfolio State: Capital, Cash)
         total_slots_size = self.total_slots * self.per_symbol_segment_size
-        symbol_data = observations[:, :total_slots_size].view(
+        symbol_data = observations[:, 2 : 2 + total_slots_size].view(
             batch_size, self.total_slots, self.per_symbol_segment_size
-        ) # [B, 10, 208]
+        ) 
         
         # 2. Split into OHLCV and Static features
-        # ohlcv data is first 180 elements (30 * 6)
-        ohlcv_data = symbol_data[:, :, :self.ohlcv_size] # [B, 10, 180]
-        static_data = symbol_data[:, :, self.ohlcv_size:] # [B, 10, 28]
+        # ohlcv data is first part of the segment
+        ohlcv_data = symbol_data[:, :, :self.ohlcv_size] 
+        static_data = symbol_data[:, :, self.ohlcv_size:] 
         
         # 3. Vectorized CNN Pass
         # Flatten Batch and Slots to process all together
-        # Reshape for CNN: [B*10, 6, 30]
+        # Reshape for CNN: [B*slots, length, channels] -> [B*slots, channels, length]
         ohlcv_reshaped = ohlcv_data.reshape(batch_size * self.total_slots, self.lookback_window, 6).permute(0, 2, 1)
-        cnn_feats_all = self.cnn(ohlcv_reshaped) # [B*10, 448]
+        cnn_feats_all = self.cnn(ohlcv_reshaped) 
         
         # 4. Reconstruct Combined Features
-        # Reshape CNN output back to [B, 10, 448]
+        # Reshape CNN output back to [B, slots, cnn_out]
         cnn_feats = cnn_feats_all.view(batch_size, self.total_slots, -1)
-        symbol_combined = th.cat([cnn_feats, static_data], dim=2) # [B, 10, 476]
+        symbol_combined = th.cat([cnn_feats, static_data], dim=2) 
         
-        # Flatten Slots into feature dimension: [B, 4760]
+        # Flatten Slots into feature dimension
         symbol_flat = symbol_combined.view(batch_size, -1)
         
         # 5. Extract global features
-        global_feats = observations[:, total_slots_size:] # [B, G]
+        # Includes first 2 elements (Capital/Cash) and last N elements (External Signals)
+        global_portfolio = observations[:, :2]
+        external_signals = observations[:, 2 + total_slots_size:]
+        global_feats = th.cat([global_portfolio, external_signals], dim=1)
         
         # 6. Final Concatenation and Linear Layers
         all_features = th.cat([symbol_flat, global_feats], dim=1)

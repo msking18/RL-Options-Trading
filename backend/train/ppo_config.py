@@ -19,12 +19,12 @@ FIXED_COMMISSION = 20.0 # Per order side (Upstox)
 PATIENCE_BONUS = 0.0002         # Per-step bonus for holding flat (no position, chose Hold)
 DRAWDOWN_THRESHOLD_SOFT = 0.06   # Early warning DD penalty (6%)
 DRAWDOWN_THRESHOLD_HARD = 0.12   # Severe exit-forcing DD penalty (12%)
-SOFT_PENALTY_SCALE = 0.5         # Gentle slope for soft penalty
-HARD_PENALTY_SCALE = 2.0         # Sharp slope for hard penalty
+SOFT_PENALTY_SCALE = 0.2         # Gentle slope for soft penalty
+HARD_PENALTY_SCALE = 1.0         # Sharp slope for hard penalty
 PENNY_JUNK_PENALTY = 0.005      # Penalty for trades < ₹2.0 on expiry day
 PENNY_THRESHOLD = 5.0           # Threshold for junk option detection
 MIN_OPTION_PRICE = 5.0          # Minimum price to allow trade entry
-ENTRY_PENALTY = 0.0002          # Flat reward penalty on trade entry
+ENTRY_PENALTY = 0.001           # Flat reward penalty on trade entry
 
 # Graduated commission tiers: {max_hold_duration: multiplier}
 # Scalps (1 step) pay 4× base, long holds (10+) pay 0.5× base
@@ -102,7 +102,7 @@ def get_ppo_params():
         "gamma": 0.99,
         "gae_lambda": 0.95,
         "clip_range": 0.2,
-        "ent_coef": 0.02,
+        "ent_coef": 0.01,
         "verbose": 1,
         "device": "auto" # Use CUDA if available
     }
