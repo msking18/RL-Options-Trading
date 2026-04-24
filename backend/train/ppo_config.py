@@ -24,8 +24,8 @@ HARD_PENALTY_SCALE = 1.0         # Sharp slope for hard penalty
 PENNY_JUNK_PENALTY = 0.005      # Penalty for trades < ₹2.0 on expiry day
 PENNY_THRESHOLD = 5.0           # Threshold for junk option detection
 MIN_OPTION_PRICE = 5.0          # Minimum price to allow trade entry
-ENTRY_PENALTY = 0.005           # Increased to discourage daily churn
-DRAWDOWN_PENALTY_MULTIPLIER = 5.0 # Reasonable scale for drawdown breaches
+ENTRY_PENALTY = 0.0005          # Reduced (10x) to encourage entering high-conviction trades
+DRAWDOWN_PENALTY_MULTIPLIER = 0.1 # Reduced (50x) to prevent hypersensitivity to noise
 
 # Graduated commission tiers: {max_hold_duration: multiplier}
 # Scalps (1 step) pay 4× base, long holds (10+) pay 0.5× base
@@ -102,8 +102,8 @@ def get_ppo_params():
         "n_steps": 2048,
         "gamma": 0.99,
         "gae_lambda": 0.95,
-        "clip_range": 0.2,
-        "ent_coef": 0.01,
+        "clip_range": 0.3,
+        "ent_coef": 0.02,
         "verbose": 1,
         "device": "auto" # Use CUDA if available
     }
