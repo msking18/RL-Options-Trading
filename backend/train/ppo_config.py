@@ -24,14 +24,15 @@ HARD_PENALTY_SCALE = 1.0         # Sharp slope for hard penalty
 PENNY_JUNK_PENALTY = 0.005      # Penalty for trades < ₹2.0 on expiry day
 PENNY_THRESHOLD = 5.0           # Threshold for junk option detection
 MIN_OPTION_PRICE = 5.0          # Minimum price to allow trade entry
-ENTRY_PENALTY = 0.001           # Flat reward penalty on trade entry
+ENTRY_PENALTY = 0.005           # Increased to discourage daily churn
+DRAWDOWN_PENALTY_MULTIPLIER = 5.0 # Reasonable scale for drawdown breaches
 
 # Graduated commission tiers: {max_hold_duration: multiplier}
 # Scalps (1 step) pay 4× base, long holds (10+) pay 0.5× base
 COMMISSION_TIERS = [
-    (1, 4.0),    # 1 step   → 4.0× commission (Less punitive exploration)
-    (2, 2.5),    # 2 steps  → 2.5× commission
-    (4, 1.5),    # 3-4 steps → 1.5× commission
+    (1, 4.0),    # 1 step   → 4.0× commission
+    (2, 2.0),    # 2 steps  → 2.0× commission (Reduced from 2.5)
+    (4, 1.2),    # 3-4 steps → 1.2× commission (Reduced from 1.5)
     (9, 1.0),    # 5-9 steps → 1.0× commission
 ]
 COMMISSION_TIER_DEFAULT = 0.5    # 10+ steps → 0.5× commission

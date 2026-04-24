@@ -13,7 +13,8 @@ from backend.train.ppo_config import (
     INITIAL_CAPITAL, PATIENCE_BONUS, DRAWDOWN_THRESHOLD_SOFT,
     DRAWDOWN_THRESHOLD_HARD, SOFT_PENALTY_SCALE, HARD_PENALTY_SCALE,
     VOL_SCALE_HIGH_THRESHOLD, VOL_SCALE_MED_THRESHOLD, SL_TP_CATEGORIES,
-    MIN_HOLD_STEPS, MIN_OPTION_PRICE, ENTRY_PENALTY, MAX_TRADES_PER_DAY
+    MIN_HOLD_STEPS, MIN_OPTION_PRICE, ENTRY_PENALTY, MAX_TRADES_PER_DAY,
+    DRAWDOWN_PENALTY_MULTIPLIER
 )
 
 class TradingEnv(gym.Env):
@@ -720,6 +721,9 @@ class TradingEnv(gym.Env):
         total_penalty = 0.0
         if np.any(act_mask):
             a_idx = np.where(act_mask)[0]
+            # Increment hold duration for all active positions that survived the step transition
+            self.state_manager.pos_hold_dur[a_idx] += 1
+            
             nxt_data = self.data_tensor[a_idx, self.current_step]
             
             # Simulated Intra-Candle logic: Delta-based approximation of option High/Low
@@ -762,8 +766,10 @@ class TradingEnv(gym.Env):
             spot_move_against = np.where(p_types == 1, spot_close - spot_low, spot_high - spot_close)
             spot_move_against = np.maximum(0, spot_move_against)
             
-            # Add a 1.05x safety buffer to the approximation to account for Gamma (delta curvature)
-            opt_low_approx = close_prices - (spot_move_against * p_deltas)
+            # Relaxed Intra-Candle logic: Apply a 0.9x factor to price move against
+            # to reduce 'noise' exits.
+            SIM_AGGRESSION = 0.9 
+            opt_low_approx = close_prices - (spot_move_against * p_deltas * SIM_AGGRESSION)
             
             # Check for SL hits (Removed 1.05x aggressive buffer)
             entries = self.state_manager.pos_entry_price[a_idx]
@@ -773,7 +779,7 @@ class TradingEnv(gym.Env):
             # Check for TP hits (Removed 0.95x aggressive buffer)
             spot_move_favor = np.where(p_types == 1, spot_high - spot_close, spot_close - spot_low)
             spot_move_favor = np.maximum(0, spot_move_favor)
-            opt_high_approx = close_prices + (spot_move_favor * p_deltas) 
+            opt_high_approx = close_prices + (spot_move_favor * p_deltas * SIM_AGGRESSION) 
             tp_prices = self.state_manager.pos_tp_price[a_idx]
             tp_hits = (tp_prices > 0) & (opt_high_approx >= tp_prices)
             
@@ -800,13 +806,12 @@ class TradingEnv(gym.Env):
                 # Update hold_dur and peaks
                 pnl_pcts = (close_prices[remaining] - entries[remaining]) / entries[remaining]
                 self.state_manager.pos_peak_pnl[r_idx] = np.maximum(self.state_manager.pos_peak_pnl[r_idx], pnl_pcts)
-                self.state_manager.pos_hold_dur[r_idx] += 1
                 
                 # Tiered Drawdown Penalty on remaining positions
                 dd = self.state_manager.pos_peak_pnl[r_idx] - pnl_pcts
                 pen = np.where(dd > DRAWDOWN_THRESHOLD_HARD, 
-                               HARD_PENALTY_SCALE * ((dd - DRAWDOWN_THRESHOLD_HARD) * 100.0),
-                               np.where(dd > DRAWDOWN_THRESHOLD_SOFT, SOFT_PENALTY_SCALE * ((dd - DRAWDOWN_THRESHOLD_SOFT) * 100.0), 0.0))
+                               HARD_PENALTY_SCALE * ((dd - DRAWDOWN_THRESHOLD_HARD) * DRAWDOWN_PENALTY_MULTIPLIER),
+                               np.where(dd > DRAWDOWN_THRESHOLD_SOFT, SOFT_PENALTY_SCALE * ((dd - DRAWDOWN_THRESHOLD_SOFT) * DRAWDOWN_PENALTY_MULTIPLIER), 0.0))
                 total_penalty = np.sum(pen)
 
         self.state_manager._update_total_capital()
