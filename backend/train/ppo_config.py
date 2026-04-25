@@ -16,7 +16,7 @@ TOTAL_SLOTS = 6
 FIXED_COMMISSION = 20.0 # Per order side (Upstox)
 
 # --- Reward Tuning ---
-PATIENCE_BONUS = 0.0002         # Per-step bonus for holding flat (no position, chose Hold)
+PATIENCE_BONUS = 0.00005         # Per-step bonus for holding flat (no position, chose Hold)
 DRAWDOWN_THRESHOLD_SOFT = 0.06   # Early warning DD penalty (6%)
 DRAWDOWN_THRESHOLD_HARD = 0.12   # Severe exit-forcing DD penalty (12%)
 SOFT_PENALTY_SCALE = 0.2         # Gentle slope for soft penalty

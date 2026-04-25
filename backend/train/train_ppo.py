@@ -160,11 +160,11 @@ def train():
         for i in range(args.num_envs)
     ])
     
+    # Add Monitor for TensorBoard stats (RAW values)
+    env = VecMonitor(env)
+
     # Apply VecNormalize for stable learning in high-dimensional finance data
     env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=10.0)
-    
-    # Add Monitor for TensorBoard stats
-    env = VecMonitor(env)
     
     params = get_ppo_params()
     
