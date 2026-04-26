@@ -28,11 +28,11 @@ ENTRY_PENALTY = 0.0005          # Reduced (10x) to encourage entering high-convi
 DRAWDOWN_PENALTY_MULTIPLIER = 0.1 # Reduced (50x) to prevent hypersensitivity to noise
 
 # Graduated commission tiers: {max_hold_duration: multiplier}
-# Scalps (1 step) pay 4× base, long holds (10+) pay 0.5× base
+# Scalps (1 step) pay 10× base to force longer holding
 COMMISSION_TIERS = [
-    (1, 4.0),    # 1 step   → 4.0× commission
-    (2, 2.0),    # 2 steps  → 2.0× commission (Reduced from 2.5)
-    (4, 1.2),    # 3-4 steps → 1.2× commission (Reduced from 1.5)
+    (1, 10.0),   # 1 step   → 10.0× commission (Aggressive discouragement)
+    (2, 4.0),    # 2 steps  → 4.0× commission
+    (4, 2.0),    # 3-4 steps → 2.0× commission
     (9, 1.0),    # 5-9 steps → 1.0× commission
 ]
 COMMISSION_TIER_DEFAULT = 0.5    # 10+ steps → 0.5× commission
@@ -42,7 +42,7 @@ VOL_SCALE_HIGH_THRESHOLD = 0.40   # Above this vol → 50% size
 VOL_SCALE_MED_THRESHOLD = 0.25    # Above this vol → 75% size
 
 # --- Minimum Hold Period ---
-MIN_HOLD_STEPS = 3               # Minimum steps before discretionary exit is allowed
+MIN_HOLD_STEPS = 5               # Forced minimum steps before exit (discourages noise trading)
 MAX_TRADES_PER_DAY = 5          # Hard limit on trade entries per symbol per day
 
 USE_CNN = True         # Toggle for 1D-CNN vs MlpPolicy
@@ -97,12 +97,12 @@ def get_ppo_params():
     Returns PPO hyperparameters for Stable-Baselines3.
     """
     params = {
-        "learning_rate": 1e-4,
+        "learning_rate": 5e-5,      # Reduced to stabilize training
         "batch_size": 1024,
         "n_steps": 2048,
         "gamma": 0.99,
         "gae_lambda": 0.95,
-        "clip_range": 0.3,
+        "clip_range": 0.2,          # Tightened to prevent policy collapse
         "ent_coef": 0.02,
         "verbose": 1,
         "device": "auto" # Use CUDA if available

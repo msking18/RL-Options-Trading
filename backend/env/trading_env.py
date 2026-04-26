@@ -194,10 +194,10 @@ class TradingEnv(gym.Env):
         # (2 * 5 * 4) for Greeks [2 expiries * 5 strikes * 4 greeks]
         # (2 * 2) for Call/Put Price [2 expiries * 2 types]
         # 3 for Pos Value, Type, Duration
-        # 5 for RSI, ATR, Vol, Trend, DD
+        # 6 for RSI, ATR, Vol, RelRet, Trend, DD
         # 3 for DTE, DayOfWeek, IsExpiry
         # 2 for Lot Size, Contract Value (Risk Management Features)
-        self.per_symbol_segment_size = (self.lookback_window * 6) + (2 * 5 * 4) + (2 * 2) + 3 + 5 + 3 + 2
+        self.per_symbol_segment_size = (self.lookback_window * 6) + (2 * 5 * 4) + (2 * 2) + 3 + 6 + 3 + 2
         self.total_obs_size = (self.per_symbol_segment_size * self.total_slots) + 2 + len(self.external_features_cols)
         self.obs_buffer = np.zeros(self.total_obs_size, dtype=np.float32)
         
@@ -470,6 +470,16 @@ class TradingEnv(gym.Env):
             rsis = (current_data[:, self.idx_rsi] - 50.0) / 50.0
             atrs = np.where(spots > 1.0, current_data[:, self.idx_atr] / spots, 0.0)
             vols = current_data[:, self.idx_vol]
+            
+            # 6. Relative Returns (conviction signal)
+            # Find Nifty 50 Index Close (idx_close=3)
+            nifty_idx = self.symbol_to_idx.get("Nifty 50", 0)
+            nifty_close = self.data_tensor[nifty_idx, self.current_step, self.idx_close]
+            nifty_ret = (nifty_close / self.data_tensor[nifty_idx, self.current_step-1, self.idx_close]) - 1.0
+            
+            sym_rets = (spots / self.data_tensor[active_sym_idxs, self.current_step-1, self.idx_close]) - 1.0
+            rel_rets = sym_rets - nifty_ret
+            
             emas_trend = np.where(current_data[:, self.idx_ema50] > current_data[:, self.idx_ema200], 1.0, -1.0)
             
             # 6. Temporal Features
@@ -518,6 +528,7 @@ class TradingEnv(gym.Env):
             sym_features[:, f_idx] = rsis; f_idx += 1
             sym_features[:, f_idx] = atrs; f_idx += 1
             sym_features[:, f_idx] = vols; f_idx += 1
+            sym_features[:, f_idx] = rel_rets; f_idx += 1
             sym_features[:, f_idx] = emas_trend; f_idx += 1
             sym_features[:, f_idx] = trailing_drawdowns; f_idx += 1
             # Temporal (3)
@@ -626,15 +637,15 @@ class TradingEnv(gym.Env):
         self.state_manager.current_step = self.current_step
         
         # 0. Daily Reset Check (Timestamp-based date change detection)
-        # We use the timestamp at the current step to determine if we've crossed into a new day.
-        # This is more robust than DOW for intraday data where DOW only changes weekly.
         if self.current_step > self.lookback_window:
             prev_ts = int(self.data_tensor[0, self.current_step - 1, self.idx_timestamp])
             curr_ts = int(self.data_tensor[0, self.current_step, self.idx_timestamp])
             
-            # Check if dates differ
-            if datetime.fromtimestamp(curr_ts).date() != datetime.fromtimestamp(prev_ts).date():
-                print(f"[DEBUG] Day Change detected at step {self.current_step}: {datetime.fromtimestamp(prev_ts).date()} -> {datetime.fromtimestamp(curr_ts).date()}")
+            # Use NumPy datetime64 for fast vectorized comparison
+            prev_date = np.datetime64(prev_ts, 's').astype('datetime64[D]')
+            curr_date = np.datetime64(curr_ts, 's').astype('datetime64[D]')
+            
+            if curr_date != prev_date:
                 self.state_manager.reset_daily_stats()
         
         # Universal timestamp for trade logs

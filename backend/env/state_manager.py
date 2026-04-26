@@ -140,7 +140,13 @@ class TradingStateManager:
         realized_pnls = exit_proceeds - entry_costs
         
         self.cash_balance += np.sum(exit_proceeds)
-        self.total_pnl += np.sum(realized_pnls)
+        
+        # Duration Bonus: Reward holding in profit (counteracts commission drag)
+        # 0.0001 per step (0.01% of cap) if profit > 5%
+        profit_mask = realized_pnls > (entry_costs * 0.05)
+        duration_bonuses = np.where(profit_mask, 0.0001 * hold_durs, 0.0)
+        
+        self.total_pnl += np.sum(realized_pnls) + np.sum(duration_bonuses)
         
         # Logging (We still need to append to trade_logs, which is a list. 
         # This is the only slow part left, but it's only called on exits)
