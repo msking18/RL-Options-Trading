@@ -24,8 +24,9 @@ HARD_PENALTY_SCALE = 1.0         # Sharp slope for hard penalty
 PENNY_JUNK_PENALTY = 0.005      # Penalty for trades < ₹2.0 on expiry day
 PENNY_THRESHOLD = 5.0           # Threshold for junk option detection
 MIN_OPTION_PRICE = 5.0          # Minimum price to allow trade entry
-ENTRY_PENALTY = 0.0005          # Reduced (10x) to encourage entering high-conviction trades
-DRAWDOWN_PENALTY_MULTIPLIER = 0.1 # Reduced (50x) to prevent hypersensitivity to noise
+ENTRY_PENALTY = 0.002          # Increased (4x) to deter excessive noise trading
+MIN_TRADE_VALUE = 50000.0       # Minimum trade value to dilute fixed commissions
+DRAWDOWN_PENALTY_MULTIPLIER = 0.15 # Slightly increased to penalize lack of risk control
 
 # Graduated commission tiers: {max_hold_duration: multiplier}
 # Scalps (1 step) pay 10× base to force longer holding
@@ -42,7 +43,7 @@ VOL_SCALE_HIGH_THRESHOLD = 0.40   # Above this vol → 50% size
 VOL_SCALE_MED_THRESHOLD = 0.25    # Above this vol → 75% size
 
 # --- Minimum Hold Period ---
-MIN_HOLD_STEPS = 5               # Forced minimum steps before exit (discourages noise trading)
+MIN_HOLD_STEPS = 12              # Forced minimum steps before exit (1 hour of 5-min steps)
 MAX_TRADES_PER_DAY = 5          # Hard limit on trade entries per symbol per day
 
 USE_CNN = True         # Toggle for 1D-CNN vs MlpPolicy
@@ -77,9 +78,9 @@ EVAL_ONLY_SYMBOLS = [
 # 3: Aggressive (35% SL, 150% TP)
 SL_TP_CATEGORIES = [
     (0.0, 0.0),    
-    (0.10, 0.25),  
-    (0.20, 0.50),  
-    (0.35, 1.50)   
+    (0.15, 0.35),  # Loosened Tight
+    (0.25, 0.60),  # Loosened Regular
+    (0.40, 1.50)   # Loosened Aggressive
 ]
 def load_best_params():
     """Loads tuned hyperparameters from JSON if available."""
@@ -119,7 +120,7 @@ def get_ppo_params():
         print("Using Architecture: 1D-CNN (Temporal Feature Extractor)")
         params["policy_kwargs"] = dict(
             features_extractor_class=Trading1DCNN,
-            features_extractor_kwargs=dict(features_dim=512, lookback_window=30, total_slots=TOTAL_SLOTS),
+            features_extractor_kwargs=dict(features_dim=512, lookback_window=60, total_slots=TOTAL_SLOTS),
             net_arch=dict(pi=[256, 256], vf=[256, 256])
         )
     else:

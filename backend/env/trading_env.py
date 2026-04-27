@@ -14,7 +14,7 @@ from backend.train.ppo_config import (
     DRAWDOWN_THRESHOLD_HARD, SOFT_PENALTY_SCALE, HARD_PENALTY_SCALE,
     VOL_SCALE_HIGH_THRESHOLD, VOL_SCALE_MED_THRESHOLD, SL_TP_CATEGORIES,
     MIN_HOLD_STEPS, MIN_OPTION_PRICE, ENTRY_PENALTY, MAX_TRADES_PER_DAY,
-    DRAWDOWN_PENALTY_MULTIPLIER
+    DRAWDOWN_PENALTY_MULTIPLIER, MIN_TRADE_VALUE
 )
 
 class TradingEnv(gym.Env):
@@ -27,7 +27,7 @@ class TradingEnv(gym.Env):
     def __init__(
         self, 
         symbols: Union[str, List[str]] = "Nifty 50", 
-        lookback_window: int = 30,
+        lookback_window: int = 60,
         initial_capital: float = INITIAL_CAPITAL,
         slippage: float = 0.001,
         start_date: Optional[str] = None,
@@ -704,13 +704,25 @@ class TradingEnv(gym.Env):
                 risk_idx = slot_actions[i, 1] 
                 sl_pct, tp_pct = SL_TP_CATEGORIES[risk_idx]
                 
-                base_lot_size = getattr(self, 'lot_size_map', {}).get(sym, 50)
-                sym_vol = curr_data[i, self.idx_vol]
-                vol_scale = 0.5 if sym_vol > VOL_SCALE_HIGH_THRESHOLD else (0.75 if sym_vol > VOL_SCALE_MED_THRESHOLD else 1.0)
-                lot_size = max(1, int(base_lot_size * vol_scale))
-                
+                # Determine option column (Current Week)
                 col = self.idx_call_e0 # e_idx 0
                 if buy_puts[i]: col += 1
+
+                # Value-based position sizing to ensure commissions are diluted
+                option_price = curr_data[i, col]
+                base_lot_size = getattr(self, 'lot_size_map', {}).get(sym, 50)
+                
+                # Target units based on MIN_TRADE_VALUE
+                target_units = MIN_TRADE_VALUE / max(option_price, 1e-6)
+                # Round to nearest lot size
+                lot_count = max(1, round(target_units / base_lot_size))
+                
+                sym_vol = curr_data[i, self.idx_vol]
+                vol_scale = 0.5 if sym_vol > VOL_SCALE_HIGH_THRESHOLD else (0.75 if sym_vol > VOL_SCALE_MED_THRESHOLD else 1.0)
+                
+                # Apply vol scale to the calculated lot count
+                final_lot_count = max(1, int(lot_count * vol_scale))
+                lot_size = final_lot_count * base_lot_size
                 
                 success = self.state_manager.enter_position(sym, 'LONG_CALL' if buy_calls[i] else 'LONG_PUT',
                                                curr_data[i, col], curr_data[i, self.idx_close],
