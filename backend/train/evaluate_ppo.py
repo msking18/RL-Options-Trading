@@ -15,7 +15,7 @@ from backend.train.metrics import (
 from backend.train.ppo_config import (
     MODEL_DIR, EVAL_DIR, TRAINING_SYMBOLS, ZERO_SHOT_SYMBOLS, get_ppo_params,
     TOTAL_SLOTS, MIN_SYMBOLS, MAX_SYMBOLS, INITIAL_CAPITAL,
-    FIXED_COMMISSION, VAL_START_DATE, VAL_END_DATE
+    FIXED_COMMISSION, VAL_START_DATE, VAL_END_DATE, LOOKBACK_WINDOW
 )
 
 def get_raw_env(env):
@@ -68,8 +68,8 @@ def evaluate_regime(model, name, symbols, start_date, end_date, preloaded_data=N
                 print(f"Warning: No data for {sym} in regime {name} after {sd}")
                 continue
             
-            # TradingEnv starts at lookback_window, so we need 30 steps before sd
-            start_idx = max(0, start_indices[0] - 30)
+            # TradingEnv starts at lookback_window, so we need LOOKBACK_WINDOW steps before sd
+            start_idx = max(0, start_indices[0] - LOOKBACK_WINDOW)
             
             end_matches = df.index[df_time <= ed].tolist()
             if not end_matches:
@@ -89,7 +89,8 @@ def evaluate_regime(model, name, symbols, start_date, end_date, preloaded_data=N
         min_active_symbols=min(len(symbols), MIN_SYMBOLS) if symbols else MIN_SYMBOLS,
         max_active_symbols=MAX_SYMBOLS,
         total_slots=TOTAL_SLOTS,
-        fixed_commission=FIXED_COMMISSION
+        fixed_commission=FIXED_COMMISSION,
+        lookback_window=LOOKBACK_WINDOW
     )
     
     # Always wrap in DummyVecEnv for consistent step returns
@@ -103,6 +104,14 @@ def evaluate_regime(model, name, symbols, start_date, end_date, preloaded_data=N
         env.norm_reward = False 
     elif stats_path:
         print(f"Warning: stats_path {stats_path} not found. Evaluation may be inaccurate.")
+    
+    # SAFETY CHECK: Verify observation space compatibility
+    if model.observation_space.shape != env.observation_space.shape:
+        print(f"\n[CRITICAL ERROR] Architecture Mismatch Detected!")
+        print(f"Model Obs Shape: {model.observation_space.shape}")
+        print(f"Env Obs Shape:   {env.observation_space.shape}")
+        print(f"The model was likely trained with a different LOOKBACK_WINDOW or static features.")
+        return None
     
     # 1. Evaluate Portfolio Model
     raw_env = get_raw_env(env)

@@ -9,7 +9,7 @@ from stable_baselines3.common.callbacks import BaseCallback
 from backend.train.ppo_config import (
     get_ppo_params, TRAINING_SYMBOLS, MODEL_DIR, LOG_DIR, 
     TOTAL_TIMESTEPS, MIN_SYMBOLS, MAX_SYMBOLS, TOTAL_SLOTS, INITIAL_CAPITAL,
-    FIXED_COMMISSION, TRAIN_START_DATE, TRAIN_END_DATE
+    FIXED_COMMISSION, TRAIN_START_DATE, TRAIN_END_DATE, LOOKBACK_WINDOW
 )
 from backend.env.trading_env import TradingEnv
 
@@ -148,7 +148,7 @@ def train():
     # Create multiple environments
     env = env_class([
         make_env(
-            symbols, 30, INITIAL_CAPITAL, 0.001, i, 
+            symbols, LOOKBACK_WINDOW, INITIAL_CAPITAL, 0.001, i, 
             preloaded_data=preloaded_data,
             min_symbols=MIN_SYMBOLS,
             max_symbols=MAX_SYMBOLS,
@@ -180,7 +180,41 @@ def train():
         # Load VecNormalize stats if they exist
         if os.path.exists(stats_path):
             env = VecNormalize.load(stats_path, env)
+        
+        # Load the model
+        print(f"Loading existing model from {latest_path}...")
         model = MaskablePPO.load(latest_path, env=env, tensorboard_log=LOG_DIR, device=params.get('device', 'cpu'))
+        
+        # SAFETY CHECK: Verify architecture compatibility
+        # We check both the total shape and specific internal parameters if possible.
+        # SB3 models store 'policy_kwargs' which contains our extractor settings.
+        saved_lookback = model.policy_kwargs.get('features_extractor_kwargs', {}).get('lookback_window')
+        saved_slots = model.policy_kwargs.get('features_extractor_kwargs', {}).get('total_slots')
+        
+        mismatch = False
+        if model.observation_space.shape != env.observation_space.shape:
+            print(f"\n[CRITICAL ERROR] Observation Space Mismatch!")
+            print(f"Model Expects: {model.observation_space.shape}")
+            print(f"Environment Provides: {env.observation_space.shape}")
+            mismatch = True
+        elif saved_lookback and saved_lookback != LOOKBACK_WINDOW:
+            print(f"\n[CRITICAL ERROR] Lookback Window Mismatch!")
+            print(f"Model was trained with LOOKBACK_WINDOW={saved_lookback}")
+            print(f"Current config has LOOKBACK_WINDOW={LOOKBACK_WINDOW}")
+            mismatch = True
+        elif saved_slots and saved_slots != TOTAL_SLOTS:
+            print(f"\n[CRITICAL ERROR] Slot Count Mismatch!")
+            print(f"Model was trained with TOTAL_SLOTS={saved_slots}")
+            print(f"Current config has TOTAL_SLOTS={TOTAL_SLOTS}")
+            mismatch = True
+
+        if mismatch:
+            print(f"\n[ACTION REQUIRED] Architecture has changed since the last saved model.")
+            print(f"To continue, you MUST either:")
+            print(f"1. Revert LOOKBACK_WINDOW/TOTAL_SLOTS in ppo_config.py to match the model.")
+            print(f"2. Run with --force-fresh to discard the old model and start a new training run.")
+            print(f"Resumption aborted to prevent runtime crash.")
+            return 
     else:
         if force_fresh:
             print("\n--- Forced Clean Start: Ignoring physical latest model ---")

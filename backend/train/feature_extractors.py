@@ -1,6 +1,7 @@
 import torch as th
 import torch.nn as nn
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
+from backend.train.ppo_config import STATIC_PER_SYMBOL_FEATURES
 
 class Trading1DCNN(BaseFeaturesExtractor):
     """
@@ -13,9 +14,20 @@ class Trading1DCNN(BaseFeaturesExtractor):
         self.lookback_window = lookback_window
         self.total_slots = total_slots
         self.ohlcv_size = lookback_window * 6
-        # Matches TradingEnv: (2*5*4) Greeks + (2*2) Prices + 3 Pos + 5 Tech + 3 Temp + 2 Risk = 57
-        self.static_per_symbol_size = 57 
+        self.static_per_symbol_size = STATIC_PER_SYMBOL_FEATURES 
         self.per_symbol_segment_size = self.ohlcv_size + self.static_per_symbol_size
+        
+        # Validation: Ensure the observation space matches our expectations
+        # total_obs = (per_symbol * slots) + 2 (Global Portfolio) + 17 (External)
+        # Note: 17 might change if EXTERNAL_FEATURES_COUNT changes, but we'll infer it
+        expected_min_size = (self.per_symbol_segment_size * total_slots) + 2
+        actual_size = observation_space.shape[0]
+        if actual_size < expected_min_size:
+            raise ValueError(
+                f"Observation space size {actual_size} is too small. "
+                f"Expected at least {expected_min_size} for {total_slots} slots "
+                f"with lookback {lookback_window} (per-slot size: {self.per_symbol_segment_size})."
+            )
         
         # 1D CNN for OHLCV data
         # input shape: [batch, 6, 30] (channels, length)
@@ -57,7 +69,19 @@ class Trading1DCNN(BaseFeaturesExtractor):
         # observations shape: [B, total_obs_size]
         # Skip first 2 elements (Global Portfolio State: Capital, Cash)
         total_slots_size = self.total_slots * self.per_symbol_segment_size
-        symbol_data = observations[:, 2 : 2 + total_slots_size].view(
+        obs_slice = observations[:, 2 : 2 + total_slots_size]
+        
+        # Guard against mismatch between Environment and Feature Extractor (e.g. lookback change)
+        if obs_slice.shape[1] != total_slots_size:
+            actual_size = obs_slice.shape[1]
+            raise RuntimeError(
+                f"Feature Extractor Mismatch: Expected total_slots_size {total_slots_size} "
+                f"({self.total_slots} slots * {self.per_symbol_segment_size} per symbol), "
+                f"but got slice of size {actual_size}. "
+                f"Lookback Window mismatch? (Extractor expects {self.lookback_window})"
+            )
+
+        symbol_data = obs_slice.view(
             batch_size, self.total_slots, self.per_symbol_segment_size
         ) 
         

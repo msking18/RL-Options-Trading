@@ -8,7 +8,7 @@ from backend.train.train_ppo import make_env
 from backend.train.evaluate_ppo import evaluate_regime
 from backend.train.ppo_config import (
     TRAINING_SYMBOLS, INITIAL_CAPITAL, MODEL_DIR, LOG_DIR, 
-    MIN_SYMBOLS, MAX_SYMBOLS, TOTAL_SLOTS, FIXED_COMMISSION
+    MIN_SYMBOLS, MAX_SYMBOLS, TOTAL_SLOTS, FIXED_COMMISSION, LOOKBACK_WINDOW
 )
 from backend.train.feature_extractors import Trading1DCNN
 
@@ -43,7 +43,7 @@ def objective(trial):
     from stable_baselines3.common.vec_env import DummyVecEnv
     env = DummyVecEnv([
         make_env(
-            TRAINING_SYMBOLS, 30, INITIAL_CAPITAL, 0.001, 0, 
+            TRAINING_SYMBOLS, LOOKBACK_WINDOW, INITIAL_CAPITAL, 0.001, 0, 
             preloaded_tensor=tensor,
             col_to_idx=col_map,
             min_symbols=MIN_SYMBOLS,
@@ -57,7 +57,7 @@ def objective(trial):
     # 3. Setup Model
     policy_kwargs = dict(
         features_extractor_class=Trading1DCNN,
-        features_extractor_kwargs=dict(features_dim=512, lookback_window=30, total_slots=TOTAL_SLOTS),
+        features_extractor_kwargs=dict(features_dim=512, lookback_window=LOOKBACK_WINDOW, total_slots=TOTAL_SLOTS),
         net_arch=dict(pi=[256, 256], vf=[256, 256])
     )
     

@@ -14,7 +14,7 @@ from backend.train.ppo_config import (
     DRAWDOWN_THRESHOLD_HARD, SOFT_PENALTY_SCALE, HARD_PENALTY_SCALE,
     VOL_SCALE_HIGH_THRESHOLD, VOL_SCALE_MED_THRESHOLD, SL_TP_CATEGORIES,
     MIN_HOLD_STEPS, MIN_OPTION_PRICE, ENTRY_PENALTY, MAX_TRADES_PER_DAY,
-    DRAWDOWN_PENALTY_MULTIPLIER, MIN_TRADE_VALUE
+    DRAWDOWN_PENALTY_MULTIPLIER, MIN_TRADE_VALUE, STATIC_PER_SYMBOL_FEATURES
 )
 
 class TradingEnv(gym.Env):
@@ -27,7 +27,7 @@ class TradingEnv(gym.Env):
     def __init__(
         self, 
         symbols: Union[str, List[str]] = "Nifty 50", 
-        lookback_window: int = 60,
+        lookback_window: int = 30,
         initial_capital: float = INITIAL_CAPITAL,
         slippage: float = 0.001,
         start_date: Optional[str] = None,
@@ -189,15 +189,7 @@ class TradingEnv(gym.Env):
         self.high_water_mark = initial_capital
 
         # Pre-allocate Observation Buffer (NumPy array)
-        # Per symbol features adjusted: 
-        # (lb*6) for OHLCV [lb*4] + Vol [lb] + OI [lb]
-        # (2 * 5 * 4) for Greeks [2 expiries * 5 strikes * 4 greeks]
-        # (2 * 2) for Call/Put Price [2 expiries * 2 types]
-        # 3 for Pos Value, Type, Duration
-        # 6 for RSI, ATR, Vol, RelRet, Trend, DD
-        # 3 for DTE, DayOfWeek, IsExpiry
-        # 2 for Lot Size, Contract Value (Risk Management Features)
-        self.per_symbol_segment_size = (self.lookback_window * 6) + (2 * 5 * 4) + (2 * 2) + 3 + 6 + 3 + 2
+        self.per_symbol_segment_size = (self.lookback_window * 6) + STATIC_PER_SYMBOL_FEATURES
         self.total_obs_size = (self.per_symbol_segment_size * self.total_slots) + 2 + len(self.external_features_cols)
         self.obs_buffer = np.zeros(self.total_obs_size, dtype=np.float32)
         

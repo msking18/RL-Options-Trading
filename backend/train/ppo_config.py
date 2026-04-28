@@ -13,6 +13,7 @@ INITIAL_CAPITAL = 1_000_000.0
 MIN_SYMBOLS = 5
 MAX_SYMBOLS = 6
 TOTAL_SLOTS = 6
+LOOKBACK_WINDOW = 30 # Number of previous steps to include in observation
 FIXED_COMMISSION = 20.0 # Per order side (Upstox)
 
 # --- Reward Tuning ---
@@ -27,6 +28,16 @@ MIN_OPTION_PRICE = 5.0          # Minimum price to allow trade entry
 ENTRY_PENALTY = 0.002          # Increased (4x) to deter excessive noise trading
 MIN_TRADE_VALUE = 50000.0       # Minimum trade value to dilute fixed commissions
 DRAWDOWN_PENALTY_MULTIPLIER = 0.15 # Slightly increased to penalize lack of risk control
+
+# --- Architecture Constants ---
+# (2*5*4) Greeks + (2*2) Prices + 3 Pos + 6 Tech + 3 Temp + 2 Risk = 58
+STATIC_PER_SYMBOL_FEATURES = 58 
+EXTERNAL_FEATURES_COUNT = 17    # Number of global external features
+
+def get_obs_size(lookback, slots):
+    """Calculates the total observation size for the given architecture."""
+    per_symbol = (lookback * 6) + STATIC_PER_SYMBOL_FEATURES
+    return (per_symbol * slots) + 2 + EXTERNAL_FEATURES_COUNT
 
 # Graduated commission tiers: {max_hold_duration: multiplier}
 # Scalps (1 step) pay 10× base to force longer holding
@@ -120,7 +131,7 @@ def get_ppo_params():
         print("Using Architecture: 1D-CNN (Temporal Feature Extractor)")
         params["policy_kwargs"] = dict(
             features_extractor_class=Trading1DCNN,
-            features_extractor_kwargs=dict(features_dim=512, lookback_window=60, total_slots=TOTAL_SLOTS),
+            features_extractor_kwargs=dict(features_dim=512, lookback_window=LOOKBACK_WINDOW, total_slots=TOTAL_SLOTS),
             net_arch=dict(pi=[256, 256], vf=[256, 256])
         )
     else:
