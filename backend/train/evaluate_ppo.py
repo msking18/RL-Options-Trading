@@ -228,6 +228,7 @@ def evaluate_regime(model, name, symbols, start_date, end_date, preloaded_data=N
         "actions": actions_log,
         "trade_logs": final_trade_logs,
         "metrics": model_metrics,
+        "win_rate": np.mean([log.get('pnl', 0) > 0 for log in final_trade_logs]) if final_trade_logs else 0.0,
         "symbols": symbols
     }
 

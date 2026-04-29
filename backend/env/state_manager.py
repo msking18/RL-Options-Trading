@@ -165,6 +165,7 @@ class TradingStateManager:
                 'exit_price': float(execution_prices[i]),
                 'pnl': float(realized_pnls[i]),
                 'pnl_pct': float(realized_pnls[i] / entry_val) if entry_val > 0 else 0.0,
+                'is_win': bool(realized_pnls[i] > 0),
                 'commission_exit': float(exit_commissions[i])
             }
             if extra_info:
@@ -220,6 +221,7 @@ class TradingStateManager:
             'exit_price': float(execution_price),
             'pnl': float(realized_pnl),
             'pnl_pct': float(realized_pnl / entry_val) if entry_val > 0 else 0.0,
+            'is_win': bool(realized_pnl > 0),
             'commission_exit': float(exit_commission)
         }
         

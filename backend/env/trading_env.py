@@ -781,9 +781,9 @@ class TradingEnv(gym.Env):
             spot_move_against = np.where(p_types == 1, spot_close - spot_low, spot_high - spot_close)
             spot_move_against = np.maximum(0, spot_move_against)
             
-            # Relaxed Intra-Candle logic: Apply a 0.9x factor to price move against
+            # Relaxed Intra-Candle logic: Apply a 0.7x factor to price move against
             # to reduce 'noise' exits.
-            SIM_AGGRESSION = 0.9 
+            SIM_AGGRESSION = 0.7 
             opt_low_approx = close_prices - (spot_move_against * p_deltas * SIM_AGGRESSION)
             
             # Check for SL hits (Removed 1.05x aggressive buffer)
@@ -858,6 +858,11 @@ class TradingEnv(gym.Env):
         if done:
             self.close_all_positions()
             info["trade_logs"] = self.state_manager.trade_logs
+            if len(self.state_manager.trade_logs) > 0:
+                wins = sum(1 for log in self.state_manager.trade_logs if log.get('pnl', 0) > 0)
+                info["win_rate"] = wins / len(self.state_manager.trade_logs)
+            else:
+                info["win_rate"] = 0.0
             
         return self._get_obs(), reward, done, False, info
 

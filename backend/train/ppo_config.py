@@ -17,7 +17,7 @@ LOOKBACK_WINDOW = 30 # Number of previous steps to include in observation
 FIXED_COMMISSION = 20.0 # Per order side (Upstox)
 
 # --- Reward Tuning ---
-PATIENCE_BONUS = 0.00005         # Per-step bonus for holding flat (no position, chose Hold)
+PATIENCE_BONUS = 0.00020         # Increased (4x) to reward choosing flat in choppy markets
 DRAWDOWN_THRESHOLD_SOFT = 0.06   # Early warning DD penalty (6%)
 DRAWDOWN_THRESHOLD_HARD = 0.12   # Severe exit-forcing DD penalty (12%)
 SOFT_PENALTY_SCALE = 0.2         # Gentle slope for soft penalty
@@ -25,9 +25,9 @@ HARD_PENALTY_SCALE = 1.0         # Sharp slope for hard penalty
 PENNY_JUNK_PENALTY = 0.005      # Penalty for trades < ₹2.0 on expiry day
 PENNY_THRESHOLD = 5.0           # Threshold for junk option detection
 MIN_OPTION_PRICE = 5.0          # Minimum price to allow trade entry
-ENTRY_PENALTY = 0.002          # Increased (4x) to deter excessive noise trading
+ENTRY_PENALTY = 0.001          # Reduced to allow more exploration while still deterring noise
 MIN_TRADE_VALUE = 50000.0       # Minimum trade value to dilute fixed commissions
-DRAWDOWN_PENALTY_MULTIPLIER = 0.15 # Slightly increased to penalize lack of risk control
+DRAWDOWN_PENALTY_MULTIPLIER = 0.25 # Increased to penalize lack of risk control
 
 # --- Architecture Constants ---
 # (2*5*4) Greeks + (2*2) Prices + 3 Pos + 6 Tech + 3 Temp + 2 Risk = 58
@@ -54,7 +54,7 @@ VOL_SCALE_HIGH_THRESHOLD = 0.40   # Above this vol → 50% size
 VOL_SCALE_MED_THRESHOLD = 0.25    # Above this vol → 75% size
 
 # --- Minimum Hold Period ---
-MIN_HOLD_STEPS = 12              # Forced minimum steps before exit (1 hour of 5-min steps)
+MIN_HOLD_STEPS = 2              # Drastically reduced to allow agent to cut losses manually
 MAX_TRADES_PER_DAY = 5          # Hard limit on trade entries per symbol per day
 
 USE_CNN = True         # Toggle for 1D-CNN vs MlpPolicy
@@ -81,17 +81,16 @@ EVAL_ONLY_SYMBOLS = [
     "SENSEX", "Nifty Bank", "Nifty 50"
 ]
 
-# --- Risk Management Categories ---
 # SL/TP mapped as (StopLossPct, TakeProfitPct)
 # 0: No SL/TP (Full discretionary)
-# 1: Tight (10% SL, 25% TP)
-# 2: Regular (20% SL, 50% TP)
-# 3: Aggressive (35% SL, 150% TP)
+# 1: Tight (20% SL, 40% TP)
+# 2: Regular (35% SL, 100% TP)
+# 3: Aggressive (50% SL, 250% TP)
 SL_TP_CATEGORIES = [
     (0.0, 0.0),    
-    (0.15, 0.35),  # Loosened Tight
-    (0.25, 0.60),  # Loosened Regular
-    (0.40, 1.50)   # Loosened Aggressive
+    (0.20, 0.40),  # Loosened
+    (0.35, 1.00),  # Loosened
+    (0.50, 2.50)   # Loosened
 ]
 def load_best_params():
     """Loads tuned hyperparameters from JSON if available."""
