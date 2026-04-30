@@ -17,7 +17,7 @@ LOOKBACK_WINDOW = 30 # Number of previous steps to include in observation
 FIXED_COMMISSION = 20.0 # Per order side (Upstox)
 
 # --- Reward Tuning ---
-PATIENCE_BONUS = 0.00020         # Increased (4x) to reward choosing flat in choppy markets
+PATIENCE_BONUS = 0.00030         # Increased to further reward choosing flat in choppy markets
 DRAWDOWN_THRESHOLD_SOFT = 0.06   # Early warning DD penalty (6%)
 DRAWDOWN_THRESHOLD_HARD = 0.12   # Severe exit-forcing DD penalty (12%)
 SOFT_PENALTY_SCALE = 0.2         # Gentle slope for soft penalty
@@ -25,7 +25,7 @@ HARD_PENALTY_SCALE = 1.0         # Sharp slope for hard penalty
 PENNY_JUNK_PENALTY = 0.005      # Penalty for trades < ₹2.0 on expiry day
 PENNY_THRESHOLD = 5.0           # Threshold for junk option detection
 MIN_OPTION_PRICE = 5.0          # Minimum price to allow trade entry
-ENTRY_PENALTY = 0.001          # Reduced to allow more exploration while still deterring noise
+ENTRY_PENALTY = 0.0002          # Reduced to allow more exploration without instant bankruptcy
 MIN_TRADE_VALUE = 50000.0       # Minimum trade value to dilute fixed commissions
 DRAWDOWN_PENALTY_MULTIPLIER = 0.25 # Increased to penalize lack of risk control
 
@@ -54,7 +54,7 @@ VOL_SCALE_HIGH_THRESHOLD = 0.40   # Above this vol → 50% size
 VOL_SCALE_MED_THRESHOLD = 0.25    # Above this vol → 75% size
 
 # --- Minimum Hold Period ---
-MIN_HOLD_STEPS = 2              # Drastically reduced to allow agent to cut losses manually
+MIN_HOLD_STEPS = 5              # Increased to force the model to look for slightly longer signals
 MAX_TRADES_PER_DAY = 5          # Hard limit on trade entries per symbol per day
 
 USE_CNN = True         # Toggle for 1D-CNN vs MlpPolicy

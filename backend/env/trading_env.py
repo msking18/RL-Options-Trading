@@ -811,6 +811,11 @@ class TradingEnv(gym.Env):
                     'is_tp': tp_hits[hitter_indices].tolist()
                 }
                 self.state_manager.bulk_exit(exit_indices, exit_prices, timestamp=current_timestamp, extra_info=hit_info)
+                
+                # Early SL Penalty: Discourage entries that hit SL within 3 steps of opening
+                early_sl_hits = sl_hits[hitter_indices] & (self.state_manager.pos_hold_dur[exit_indices] <= 3)
+                if np.any(early_sl_hits):
+                    total_penalty += np.sum(early_sl_hits) * 0.0005 
             
             # Remaining positions update curr_value
             remaining = ~ (sl_hits | tp_hits)
@@ -827,7 +832,7 @@ class TradingEnv(gym.Env):
                 pen = np.where(dd > DRAWDOWN_THRESHOLD_HARD, 
                                HARD_PENALTY_SCALE * ((dd - DRAWDOWN_THRESHOLD_HARD) * DRAWDOWN_PENALTY_MULTIPLIER),
                                np.where(dd > DRAWDOWN_THRESHOLD_SOFT, SOFT_PENALTY_SCALE * ((dd - DRAWDOWN_THRESHOLD_SOFT) * DRAWDOWN_PENALTY_MULTIPLIER), 0.0))
-                total_penalty = np.sum(pen)
+                total_penalty += np.sum(pen)
 
         self.state_manager._update_total_capital()
         new_capital = self.state_manager.total_capital
