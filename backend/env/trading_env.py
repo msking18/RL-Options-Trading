@@ -14,7 +14,8 @@ from backend.train.ppo_config import (
     DRAWDOWN_THRESHOLD_HARD, SOFT_PENALTY_SCALE, HARD_PENALTY_SCALE,
     VOL_SCALE_HIGH_THRESHOLD, VOL_SCALE_MED_THRESHOLD, SL_TP_CATEGORIES,
     MIN_HOLD_STEPS, MIN_OPTION_PRICE, ENTRY_PENALTY, MAX_TRADES_PER_DAY,
-    DRAWDOWN_PENALTY_MULTIPLIER, MIN_TRADE_VALUE, STATIC_PER_SYMBOL_FEATURES
+    DRAWDOWN_PENALTY_MULTIPLIER, MIN_TRADE_VALUE, STATIC_PER_SYMBOL_FEATURES,
+    REWARD_SCALE, SIM_AGGRESSION
 )
 
 class TradingEnv(gym.Env):
@@ -684,6 +685,12 @@ class TradingEnv(gym.Env):
                 exit_prices = curr_data[rel_exits, exit_cols]
                 
                 self.state_manager.bulk_exit(exit_indices, exit_prices, timestamp=current_timestamp, extra_info=extra_info)
+                
+                # Trade quality signal: count profitable exits for bonus applied later
+                self._exit_quality_bonus = sum(
+                    0.001 for log in self.state_manager.trade_logs[-len(exit_indices):]
+                    if log.get('pnl', 0) > 0
+                )
             
             # Enters (Action 1: Buy Call, 2: Buy Put) - MUST respect masks
             buy_calls = (slot_actions[:, 0] == 1) & active_masks[:, 1]
@@ -781,9 +788,8 @@ class TradingEnv(gym.Env):
             spot_move_against = np.where(p_types == 1, spot_close - spot_low, spot_high - spot_close)
             spot_move_against = np.maximum(0, spot_move_against)
             
-            # Relaxed Intra-Candle logic: Apply a 0.7x factor to price move against
-            # to reduce 'noise' exits.
-            SIM_AGGRESSION = 0.7 
+            # Relaxed Intra-Candle logic: Apply configurable SIM_AGGRESSION factor
+            # to reduce 'noise' exits. (Reduced from 0.7 to 0.4 via ppo_config)
             opt_low_approx = close_prices - (spot_move_against * p_deltas * SIM_AGGRESSION)
             
             # Check for SL hits (Removed 1.05x aggressive buffer)
@@ -838,8 +844,13 @@ class TradingEnv(gym.Env):
         new_capital = self.state_manager.total_capital
         
         # 4. Reward Logic
-        reward = (new_capital - prev_capital) / self.initial_capital
+        reward = (new_capital - prev_capital) / self.initial_capital * REWARD_SCALE
         reward -= total_penalty
+        
+        # Apply trade quality bonus accumulated from profitable exits
+        if hasattr(self, '_exit_quality_bonus') and self._exit_quality_bonus > 0:
+            reward += self._exit_quality_bonus
+            self._exit_quality_bonus = 0.0
         
         # Apply entry penalties if any new positions were opened
         if 'num_entries' in locals() and num_entries > 0:
@@ -852,10 +863,10 @@ class TradingEnv(gym.Env):
             )
             reward += flat_holds * PATIENCE_BONUS
         
-        # Death Penalty
-        if new_capital < (self.initial_capital * 0.3):
+        # Death Penalty — tightened to 50% loss for faster learning signal
+        if new_capital < (self.initial_capital * 0.5):
             done = True
-            reward -= 0.1
+            reward -= 0.2
             
         self._update_action_masks_vectorized()
         info = {"capital": new_capital}

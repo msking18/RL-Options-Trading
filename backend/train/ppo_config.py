@@ -17,13 +17,12 @@ LOOKBACK_WINDOW = 30 # Number of previous steps to include in observation
 FIXED_COMMISSION = 20.0 # Per order side (Upstox)
 
 # --- Reward Tuning ---
-PATIENCE_BONUS = 0.00030         # Increased to further reward choosing flat in choppy markets
+PATIENCE_BONUS = 0.00005         # Tiebreaker only — no longer dominates capital return signal
+REWARD_SCALE = 10.0              # Scale capital-change reward to be dominant signal
 DRAWDOWN_THRESHOLD_SOFT = 0.06   # Early warning DD penalty (6%)
 DRAWDOWN_THRESHOLD_HARD = 0.12   # Severe exit-forcing DD penalty (12%)
 SOFT_PENALTY_SCALE = 0.2         # Gentle slope for soft penalty
 HARD_PENALTY_SCALE = 1.0         # Sharp slope for hard penalty
-PENNY_JUNK_PENALTY = 0.005      # Penalty for trades < ₹2.0 on expiry day
-PENNY_THRESHOLD = 5.0           # Threshold for junk option detection
 MIN_OPTION_PRICE = 5.0          # Minimum price to allow trade entry
 ENTRY_PENALTY = 0.0002          # Reduced to allow more exploration without instant bankruptcy
 MIN_TRADE_VALUE = 50000.0       # Minimum trade value to dilute fixed commissions
@@ -56,6 +55,7 @@ VOL_SCALE_MED_THRESHOLD = 0.25    # Above this vol → 75% size
 # --- Minimum Hold Period ---
 MIN_HOLD_STEPS = 5              # Increased to force the model to look for slightly longer signals
 MAX_TRADES_PER_DAY = 5          # Hard limit on trade entries per symbol per day
+SIM_AGGRESSION = 0.4            # Intra-candle SL/TP delta simulation factor (reduced from 0.7)
 
 USE_CNN = True         # Toggle for 1D-CNN vs MlpPolicy
 
@@ -83,14 +83,14 @@ EVAL_ONLY_SYMBOLS = [
 
 # SL/TP mapped as (StopLossPct, TakeProfitPct)
 # 0: No SL/TP (Full discretionary)
-# 1: Tight (20% SL, 40% TP)
-# 2: Regular (35% SL, 100% TP)
-# 3: Aggressive (50% SL, 250% TP)
+# 1: Conservative (35% SL, 70% TP) — widened from 20%/40% to avoid noise SL hits
+# 2: Standard (50% SL, 150% TP)
+# 3: Wide (70% SL, 300% TP)
 SL_TP_CATEGORIES = [
-    (0.0, 0.0),    
-    (0.20, 0.40),  # Loosened
-    (0.35, 1.00),  # Loosened
-    (0.50, 2.50)   # Loosened
+    (0.0, 0.0),          # No SL/TP (full discretion)
+    (0.35, 0.70),        # Conservative
+    (0.50, 1.50),        # Standard
+    (0.70, 3.00)         # Wide
 ]
 def load_best_params():
     """Loads tuned hyperparameters from JSON if available."""
@@ -113,8 +113,8 @@ def get_ppo_params():
         "n_steps": 2048,
         "gamma": 0.99,
         "gae_lambda": 0.95,
-        "clip_range": 0.2,          # Tightened to prevent policy collapse
-        "ent_coef": 0.02,
+        "clip_range": 0.15,         # Tightened further: 44% clip fraction was way too high
+        "ent_coef": 0.01,           # Reduced initial entropy to lower policy randomness
         "verbose": 1,
         "device": "auto" # Use CUDA if available
     }
