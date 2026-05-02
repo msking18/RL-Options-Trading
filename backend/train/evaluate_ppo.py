@@ -235,20 +235,56 @@ def evaluate_regime(model, name, symbols, start_date, end_date, preloaded_data=N
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-path", type=str, default=None)
+    parser.add_argument("--model-source", type=str, default="best_ev",
+                        choices=["best_ev", "early_stop", "latest", "path"],
+                        help="Which model checkpoint to evaluate. "
+                             "'best_ev' = best explained variance checkpoint, "
+                             "'early_stop' = early-stopped checkpoint, "
+                             "'latest' = final model, "
+                             "'path' = use --model-path explicitly.")
     parser.add_argument("--timestamp", type=str, default=None)
     parser.add_argument("--symbols", type=str, default=None)
     args = parser.parse_args()
     
     timestamp = args.timestamp if args.timestamp else datetime.now().strftime("%Y%m%d_%H%M%S")
-    model_path = args.model_path if args.model_path else os.path.join(MODEL_DIR, "ppo_latest.zip")
-    stats_path = os.path.join(MODEL_DIR, "vec_normalize.pkl")
     symbols_list = args.symbols.split(",") if args.symbols else TRAINING_SYMBOLS
+    
+    # Resolve model path based on --model-source
+    if args.model_path:
+        # Explicit path always wins (backward compatible)
+        model_path = args.model_path
+        stats_path = os.path.join(MODEL_DIR, "vec_normalize.pkl")
+    else:
+        # Smart checkpoint selection
+        source_map = {
+            "best_ev":    ("ppo_best_ev.zip",    "vec_normalize_best_ev.pkl"),
+            "early_stop": ("ppo_early_stop.zip", "vec_normalize_early_stop.pkl"),
+            "latest":     ("ppo_latest.zip",     "vec_normalize.pkl"),
+        }
+        
+        source = args.model_source
+        model_file, stats_file = source_map.get(source, source_map["latest"])
+        model_path = os.path.join(MODEL_DIR, model_file)
+        stats_path = os.path.join(MODEL_DIR, stats_file)
+        
+        # Fallback chain: best_ev → early_stop → latest
+        if not os.path.exists(model_path):
+            print(f"Warning: {source} model not found at {model_path}")
+            for fallback_source in ["best_ev", "early_stop", "latest"]:
+                fb_model, fb_stats = source_map[fallback_source]
+                fb_path = os.path.join(MODEL_DIR, fb_model)
+                if os.path.exists(fb_path):
+                    print(f"Falling back to '{fallback_source}' at {fb_path}")
+                    model_path = fb_path
+                    stats_path = os.path.join(MODEL_DIR, fb_stats)
+                    break
     
     if not os.path.exists(model_path):
         print(f"Error: Model not found at {model_path}")
         return
 
     print(f"Loading model for portfolio evaluation: {model_path}")
+    print(f"Model source: {args.model_source}")
     device = get_ppo_params().get('device', 'cpu')
     model = MaskablePPO.load(model_path, device=device)
     

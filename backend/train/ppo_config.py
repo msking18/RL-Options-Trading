@@ -9,6 +9,16 @@ LOG_DIR = os.getenv("LOG_DIR", "ppo_trading_tensorboard")
 
 # --- Training Configuration ---
 TOTAL_TIMESTEPS = 5_000_000 # Increased for vectorized environment depth
+
+# --- Annealing Configuration ---
+INITIAL_LR = 3e-5               # Reduced from 5e-5 to dampen late-training policy oscillation
+FINAL_LR = 1e-5                 # Terminal learning rate
+ENT_COEF_MIN = 0.003            # Floor for entropy — never anneal to zero to preserve exploration
+
+# --- Stability Guard ---
+CLIP_FRACTION_THRESHOLD = 0.35  # Early-stop if clip_fraction exceeds this for CLIP_PATIENCE intervals
+CLIP_PATIENCE = 10              # Consecutive violations before early stop (~160K steps at 2048 n_steps)
+CHECKPOINT_FREQ = 500_000      # Save a checkpoint every N total timesteps
 INITIAL_CAPITAL = 1_000_000.0
 MIN_SYMBOLS = 5
 MAX_SYMBOLS = 6
@@ -108,7 +118,7 @@ def get_ppo_params():
     Returns PPO hyperparameters for Stable-Baselines3.
     """
     params = {
-        "learning_rate": 5e-5,      # Reduced to stabilize training
+        "learning_rate": INITIAL_LR, # Centralized — see INITIAL_LR constant
         "batch_size": 1024,
         "n_steps": 2048,
         "gamma": 0.99,

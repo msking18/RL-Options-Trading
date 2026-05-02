@@ -5,16 +5,18 @@ from datetime import datetime
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.wrappers import ActionMasker
 from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv, VecMonitor, VecNormalize
-from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.callbacks import BaseCallback, CheckpointCallback
 from backend.train.ppo_config import (
     get_ppo_params, TRAINING_SYMBOLS, MODEL_DIR, LOG_DIR, 
     TOTAL_TIMESTEPS, MIN_SYMBOLS, MAX_SYMBOLS, TOTAL_SLOTS, INITIAL_CAPITAL,
-    FIXED_COMMISSION, TRAIN_START_DATE, TRAIN_END_DATE, LOOKBACK_WINDOW
+    FIXED_COMMISSION, TRAIN_START_DATE, TRAIN_END_DATE, LOOKBACK_WINDOW,
+    INITIAL_LR, FINAL_LR, ENT_COEF_MIN, CLIP_FRACTION_THRESHOLD,
+    CLIP_PATIENCE, CHECKPOINT_FREQ
 )
 from backend.env.trading_env import TradingEnv
 
 class HyperparameterAnnealingCallback(BaseCallback):
-    def __init__(self, initial_lr=3e-4, final_lr=1e-5, initial_ent=0.01, final_ent=0.0, verbose=0):
+    def __init__(self, initial_lr=3e-5, final_lr=1e-5, initial_ent=0.01, final_ent=0.003, verbose=0):
         super(HyperparameterAnnealingCallback, self).__init__(verbose)
         self.initial_lr = initial_lr
         self.final_lr = final_lr
@@ -72,6 +74,59 @@ class TradeDebugCallback(BaseCallback):
                     self.logger.record("debug/avg_hold_duration", avg_dur)
                     self.logger.record("debug/total_trades_per_episode", total_trades)
         
+        return True
+
+class StabilityGuardCallback(BaseCallback):
+    """
+    Monitors training stability via clip_fraction and explained_variance.
+    - Saves a 'ppo_best_ev.zip' checkpoint whenever explained_variance improves.
+    - Triggers early stopping if clip_fraction exceeds threshold for `patience`
+      consecutive logging intervals.
+    """
+    def __init__(self, clip_threshold=0.35, patience=10, model_dir=MODEL_DIR, verbose=0):
+        super().__init__(verbose)
+        self.clip_threshold = clip_threshold
+        self.patience = patience
+        self.model_dir = model_dir
+        self.consecutive_violations = 0
+        self.best_ev = -float('inf')
+        self.best_ev_step = 0
+
+    def _on_step(self) -> bool:
+        clip_frac = self.logger.name_to_value.get("train/clip_fraction")
+        ev = self.logger.name_to_value.get("train/explained_variance")
+
+        # Track best explained variance and save checkpoint
+        if ev is not None and ev > self.best_ev:
+            self.best_ev = ev
+            self.best_ev_step = self.num_timesteps
+            best_path = os.path.join(self.model_dir, "ppo_best_ev.zip")
+            self.model.save(best_path)
+            # Also save VecNormalize stats alongside
+            if hasattr(self.training_env, 'save'):
+                self.training_env.save(os.path.join(self.model_dir, "vec_normalize_best_ev.pkl"))
+            if self.verbose:
+                print(f"[StabilityGuard] New best EV={ev:.4f} at step {self.num_timesteps}. Saved.")
+
+        # Monitor clip_fraction for early stopping
+        if clip_frac is not None:
+            if clip_frac > self.clip_threshold:
+                self.consecutive_violations += 1
+                if self.verbose:
+                    print(f"[StabilityGuard] clip_fraction={clip_frac:.3f} > {self.clip_threshold} "
+                          f"({self.consecutive_violations}/{self.patience})")
+                if self.consecutive_violations >= self.patience:
+                    print(f"\n[StabilityGuard] EARLY STOP: clip_fraction exceeded {self.clip_threshold} "
+                          f"for {self.patience} consecutive intervals.")
+                    print(f"[StabilityGuard] Best EV was {self.best_ev:.4f} at step {self.best_ev_step}")
+                    stop_path = os.path.join(self.model_dir, "ppo_early_stop.zip")
+                    self.model.save(stop_path)
+                    if hasattr(self.training_env, 'save'):
+                        self.training_env.save(os.path.join(self.model_dir, "vec_normalize_early_stop.pkl"))
+                    return False  # Stops training
+            else:
+                self.consecutive_violations = 0
+
         return True
 
 def mask_fn(env):
@@ -235,10 +290,24 @@ def train():
         tb_log_name=f"PPO_Portfolio_{timestamp}",
         callback=[
             HyperparameterAnnealingCallback(
-                initial_lr=params.get('learning_rate', 3e-4),
-                initial_ent=params.get('ent_coef', 0.01)
+                initial_lr=INITIAL_LR,
+                final_lr=FINAL_LR,
+                initial_ent=params.get('ent_coef', 0.01),
+                final_ent=ENT_COEF_MIN
             ),
-            TradeDebugCallback()
+            TradeDebugCallback(),
+            StabilityGuardCallback(
+                clip_threshold=CLIP_FRACTION_THRESHOLD,
+                patience=CLIP_PATIENCE,
+                verbose=1
+            ),
+            CheckpointCallback(
+                save_freq=max(1, CHECKPOINT_FREQ // args.num_envs),
+                save_path=os.path.join(MODEL_DIR, "checkpoints"),
+                name_prefix="ppo_checkpoint",
+                save_vecnormalize=True,
+                verbose=1
+            )
         ]
     )
     

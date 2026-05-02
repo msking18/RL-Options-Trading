@@ -21,6 +21,10 @@ def main():
     parser.add_argument("--skip-train", action="store_true", help="Skip the training phase")
     parser.add_argument("--skip-eval", action="store_true", help="Skip the evaluation phase")
     parser.add_argument("--skip-report", action="store_true", help="Skip the reporting phase")
+    parser.add_argument("--force-fresh", action="store_true", help="Force training from scratch")
+    parser.add_argument("--model-source", type=str, default="best_ev",
+                        choices=["best_ev", "early_stop", "latest"],
+                        help="Which checkpoint to evaluate after training")
     args = parser.parse_args()
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -34,6 +38,8 @@ def main():
             "--total-timesteps", str(args.timesteps),
             "--timestamp", timestamp
         ]
+        if args.force_fresh:
+            train_cmd.append("--force-fresh")
         if not run_command(train_cmd):
             return
 
@@ -42,7 +48,8 @@ def main():
         print("\n--- Phase 2: Evaluation ---")
         eval_cmd = [
             "python", "-m", "backend.train.evaluate_ppo",
-            "--timestamp", timestamp
+            "--timestamp", timestamp,
+            "--model-source", args.model_source
         ]
         if not run_command(eval_cmd):
             return
