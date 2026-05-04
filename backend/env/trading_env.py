@@ -15,7 +15,7 @@ from backend.train.ppo_config import (
     VOL_SCALE_HIGH_THRESHOLD, VOL_SCALE_MED_THRESHOLD, SL_TP_CATEGORIES,
     MIN_HOLD_STEPS, MIN_OPTION_PRICE, ENTRY_PENALTY, MAX_TRADES_PER_DAY,
     DRAWDOWN_PENALTY_MULTIPLIER, MIN_TRADE_VALUE, STATIC_PER_SYMBOL_FEATURES,
-    REWARD_SCALE, SIM_AGGRESSION
+    REWARD_SCALE, SIM_AGGRESSION, VOLATILITY_EXPANSION_BONUS
 )
 
 class TradingEnv(gym.Env):
@@ -687,10 +687,16 @@ class TradingEnv(gym.Env):
                 self.state_manager.bulk_exit(exit_indices, exit_prices, timestamp=current_timestamp, extra_info=extra_info)
                 
                 # Trade quality signal: count profitable exits for bonus applied later
-                self._exit_quality_bonus = sum(
-                    0.001 for log in self.state_manager.trade_logs[-len(exit_indices):]
-                    if log.get('pnl', 0) > 0
-                )
+                self._exit_quality_bonus = 0.0
+                rel_exits = np.where(exits)[0]
+                logs = self.state_manager.trade_logs[-len(exit_indices):]
+                for j, log in enumerate(logs):
+                    if log.get('pnl', 0) > 0:
+                        bonus = 0.001
+                        # Boost bonus if exiting profitably in high vol
+                        if curr_data[rel_exits[j], self.idx_vol] > VOL_SCALE_MED_THRESHOLD:
+                            bonus *= 2.0
+                        self._exit_quality_bonus += bonus
             
             # Enters (Action 1: Buy Call, 2: Buy Put) - MUST respect masks
             buy_calls = (slot_actions[:, 0] == 1) & active_masks[:, 1]
@@ -838,7 +844,12 @@ class TradingEnv(gym.Env):
                 pen = np.where(dd > DRAWDOWN_THRESHOLD_HARD, 
                                HARD_PENALTY_SCALE * ((dd - DRAWDOWN_THRESHOLD_HARD) * DRAWDOWN_PENALTY_MULTIPLIER),
                                np.where(dd > DRAWDOWN_THRESHOLD_SOFT, SOFT_PENALTY_SCALE * ((dd - DRAWDOWN_THRESHOLD_SOFT) * DRAWDOWN_PENALTY_MULTIPLIER), 0.0))
-                total_penalty += np.sum(pen)
+                
+                # Volatility Expansion Bonus: Reward holding through high-volatility trends
+                vols = nxt_data[remaining, self.idx_vol]
+                vol_bonus = np.where(vols > VOL_SCALE_MED_THRESHOLD, VOLATILITY_EXPANSION_BONUS, 0.0)
+                
+                total_penalty += (np.sum(pen) - np.sum(vol_bonus))
 
         self.state_manager._update_total_capital()
         new_capital = self.state_manager.total_capital

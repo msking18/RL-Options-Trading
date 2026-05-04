@@ -13,7 +13,7 @@ TOTAL_TIMESTEPS = 5_000_000 # Increased for vectorized environment depth
 # --- Annealing Configuration ---
 INITIAL_LR = 3e-5               # Reduced from 5e-5 to dampen late-training policy oscillation
 FINAL_LR = 1e-5                 # Terminal learning rate
-ENT_COEF_MIN = 0.003            # Floor for entropy — never anneal to zero to preserve exploration
+ENT_COEF_MIN = 0.002            # Floor for entropy — never anneal to zero to preserve exploitation
 
 # --- Stability Guard ---
 CLIP_FRACTION_THRESHOLD = 0.35  # Early-stop if clip_fraction exceeds this for CLIP_PATIENCE intervals
@@ -29,6 +29,7 @@ FIXED_COMMISSION = 20.0 # Per order side (Upstox)
 # --- Reward Tuning ---
 PATIENCE_BONUS = 0.00005         # Tiebreaker only — no longer dominates capital return signal
 REWARD_SCALE = 10.0              # Scale capital-change reward to be dominant signal
+VOLATILITY_EXPANSION_BONUS = 0.001 # Small bonus for every step held during high vol
 DRAWDOWN_THRESHOLD_SOFT = 0.06   # Early warning DD penalty (6%)
 DRAWDOWN_THRESHOLD_HARD = 0.12   # Severe exit-forcing DD penalty (12%)
 SOFT_PENALTY_SCALE = 0.2         # Gentle slope for soft penalty
@@ -51,8 +52,8 @@ def get_obs_size(lookback, slots):
 # Graduated commission tiers: {max_hold_duration: multiplier}
 # Scalps (1 step) pay 10× base to force longer holding
 COMMISSION_TIERS = [
-    (1, 10.0),   # 1 step   → 10.0× commission (Aggressive discouragement)
-    (2, 4.0),    # 2 steps  → 4.0× commission
+    (1, 5.0),    # 1 step   → 5.0× commission (Relaxed to allow faster loss cutting)
+    (2, 3.0),    # 2 steps  → 3.0× commission
     (4, 2.0),    # 3-4 steps → 2.0× commission
     (9, 1.0),    # 5-9 steps → 1.0× commission
 ]

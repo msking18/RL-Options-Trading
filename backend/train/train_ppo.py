@@ -16,7 +16,7 @@ from backend.train.ppo_config import (
 from backend.env.trading_env import TradingEnv
 
 class HyperparameterAnnealingCallback(BaseCallback):
-    def __init__(self, initial_lr=3e-5, final_lr=1e-5, initial_ent=0.01, final_ent=0.003, verbose=0):
+    def __init__(self, initial_lr=3e-5, final_lr=1e-5, initial_ent=0.01, final_ent=0.002, verbose=0):
         super(HyperparameterAnnealingCallback, self).__init__(verbose)
         self.initial_lr = initial_lr
         self.final_lr = final_lr
