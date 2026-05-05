@@ -15,7 +15,8 @@ from backend.train.ppo_config import (
     VOL_SCALE_HIGH_THRESHOLD, VOL_SCALE_MED_THRESHOLD, SL_TP_CATEGORIES,
     MIN_HOLD_STEPS, MIN_OPTION_PRICE, ENTRY_PENALTY, MAX_TRADES_PER_DAY,
     DRAWDOWN_PENALTY_MULTIPLIER, MIN_TRADE_VALUE, STATIC_PER_SYMBOL_FEATURES,
-    REWARD_SCALE, SIM_AGGRESSION, VOLATILITY_EXPANSION_BONUS
+    REWARD_SCALE, SIM_AGGRESSION, VOLATILITY_EXPANSION_BONUS,
+    REGIME_VOL_LOW, REGIME_VOL_HIGH, MAX_STALE_DURATION, STALE_PENALTY_MULTIPLIER
 )
 
 class TradingEnv(gym.Env):
@@ -191,7 +192,7 @@ class TradingEnv(gym.Env):
 
         # Pre-allocate Observation Buffer (NumPy array)
         self.per_symbol_segment_size = (self.lookback_window * 6) + STATIC_PER_SYMBOL_FEATURES
-        self.total_obs_size = (self.per_symbol_segment_size * self.total_slots) + 2 + len(self.external_features_cols)
+        self.total_obs_size = (self.per_symbol_segment_size * self.total_slots) + 2 + len(self.external_features_cols) + 1 # +1 for Regime Signal
         self.obs_buffer = np.zeros(self.total_obs_size, dtype=np.float32)
         
         # Slice mapping for each slot to avoid repeated math
@@ -426,7 +427,7 @@ class TradingEnv(gym.Env):
         # 2. Per-Slot Data (Vectorized 3D approach)
         active_slots = [i for i, active in enumerate(self.active_slots_mask) if active]
         
-        data_section_end = self.total_obs_size - len(self.external_features_cols)
+        data_section_end = self.total_obs_size - (len(self.external_features_cols) + 1)
         self.obs_buffer[2 : data_section_end] = 0.0
         
         if active_slots:
@@ -544,7 +545,19 @@ class TradingEnv(gym.Env):
         external_vals = self.data_tensor[0, self.current_step, self.idx_ext_start : self.idx_ext_start + ext_len].copy()
         rel_max_impact = self.idx_max_impact - self.idx_ext_start
         external_vals[rel_max_impact] /= 3.0
-        self.obs_buffer[-ext_len:] = external_vals
+        self.obs_buffer[-(ext_len + 1):-1] = external_vals
+        
+        # Calculate Regime Signal based on Nifty 50 Volatility
+        nifty_idx = self.symbol_to_idx.get("Nifty 50", 0)
+        nifty_vol = self.data_tensor[nifty_idx, self.current_step, self.idx_vol]
+        if nifty_vol < REGIME_VOL_LOW:
+            regime_signal = 0.0
+        elif nifty_vol <= REGIME_VOL_HIGH:
+            regime_signal = 1.0
+        else:
+            regime_signal = 2.0
+            
+        self.obs_buffer[-1] = regime_signal
         
         return self.obs_buffer # Removed .copy() for maximum speed
 
@@ -849,7 +862,16 @@ class TradingEnv(gym.Env):
                 vols = nxt_data[remaining, self.idx_vol]
                 vol_bonus = np.where(vols > VOL_SCALE_MED_THRESHOLD, VOLATILITY_EXPANSION_BONUS, 0.0)
                 
-                total_penalty += (np.sum(pen) - np.sum(vol_bonus))
+                # Stale Position Penalty
+                # Track self.state_manager.pos_hold_dur and penalize if > MAX_STALE_DURATION and PnL is flat/negative
+                stale_durations = self.state_manager.pos_hold_dur[r_idx]
+                stale_penalties = np.where(
+                    (stale_durations > MAX_STALE_DURATION) & (pnl_pcts <= 0.005),
+                    STALE_PENALTY_MULTIPLIER * (stale_durations - MAX_STALE_DURATION),
+                    0.0
+                )
+                
+                total_penalty += (np.sum(pen) + np.sum(stale_penalties) - np.sum(vol_bonus))
 
         self.state_manager._update_total_capital()
         new_capital = self.state_manager.total_capital

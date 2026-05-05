@@ -42,7 +42,7 @@ DRAWDOWN_PENALTY_MULTIPLIER = 0.25 # Increased to penalize lack of risk control
 # --- Architecture Constants ---
 # (2*5*4) Greeks + (2*2) Prices + 3 Pos + 6 Tech + 3 Temp + 2 Risk = 58
 STATIC_PER_SYMBOL_FEATURES = 58 
-EXTERNAL_FEATURES_COUNT = 17    # Number of global external features
+EXTERNAL_FEATURES_COUNT = 18    # Number of global external features + 1 for Regime Signal
 
 def get_obs_size(lookback, slots):
     """Calculates the total observation size for the given architecture."""
@@ -58,6 +58,13 @@ COMMISSION_TIERS = [
     (9, 1.0),    # 5-9 steps → 1.0× commission
 ]
 COMMISSION_TIER_DEFAULT = 0.5    # 10+ steps → 0.5× commission
+
+# --- Regime & Stale Penalties ---
+MAX_STALE_DURATION = 20
+STALE_PENALTY_MULTIPLIER = 0.005
+REGIME_VOL_LOW = 0.15
+REGIME_VOL_HIGH = 0.25
+EARLY_STOPPING_PATIENCE = 5
 
 # --- Volatility Position Sizing ---
 VOL_SCALE_HIGH_THRESHOLD = 0.40   # Above this vol → 50% size

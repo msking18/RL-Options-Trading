@@ -5,13 +5,14 @@ from datetime import datetime
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.wrappers import ActionMasker
 from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv, VecMonitor, VecNormalize
-from stable_baselines3.common.callbacks import BaseCallback, CheckpointCallback
+from stable_baselines3.common.callbacks import BaseCallback, CheckpointCallback, EvalCallback, StopTrainingOnNoModelImprovement
 from backend.train.ppo_config import (
     get_ppo_params, TRAINING_SYMBOLS, MODEL_DIR, LOG_DIR, 
     TOTAL_TIMESTEPS, MIN_SYMBOLS, MAX_SYMBOLS, TOTAL_SLOTS, INITIAL_CAPITAL,
     FIXED_COMMISSION, TRAIN_START_DATE, TRAIN_END_DATE, LOOKBACK_WINDOW,
     INITIAL_LR, FINAL_LR, ENT_COEF_MIN, CLIP_FRACTION_THRESHOLD,
-    CLIP_PATIENCE, CHECKPOINT_FREQ
+    CLIP_PATIENCE, CHECKPOINT_FREQ, VAL_START_DATE, VAL_END_DATE,
+    EARLY_STOPPING_PATIENCE
 )
 from backend.env.trading_env import TradingEnv
 
@@ -181,6 +182,10 @@ def train():
     temp_env = TradingEnv(symbols=symbols, start_date=TRAIN_START_DATE, end_date=TRAIN_END_DATE)
     preloaded_data = temp_env.all_dfs
     
+    print(f"\n--- Pre-loading Data for Eval Workers ({VAL_START_DATE} to {VAL_END_DATE}) ---")
+    temp_eval_env = TradingEnv(symbols=symbols, start_date=VAL_START_DATE, end_date=VAL_END_DATE)
+    preloaded_eval_data = temp_eval_env.all_dfs
+    
     # Determine vectorized environment type
     if args.num_envs > 1:
         # For multiple environments, use SubprocVecEnv with 'fork' for Linux speed 
@@ -220,6 +225,24 @@ def train():
 
     # Apply VecNormalize for stable learning in high-dimensional finance data
     env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=10.0)
+
+    # Create Evaluation Environment
+    eval_env = DummyVecEnv([
+        make_env(
+            symbols, LOOKBACK_WINDOW, INITIAL_CAPITAL, 0.001, 0, 
+            preloaded_data=preloaded_eval_data,
+            min_symbols=MIN_SYMBOLS,
+            max_symbols=MAX_SYMBOLS,
+            total_slots=TOTAL_SLOTS,
+            fixed_commission=FIXED_COMMISSION,
+            start_date=VAL_START_DATE,
+            end_date=VAL_END_DATE
+        )
+    ])
+    eval_env = VecMonitor(eval_env)
+    # The EvalCallback will automatically sync the normalization stats from the training env
+    eval_env = VecNormalize(eval_env, norm_obs=True, norm_reward=False, clip_obs=10.0)
+    eval_env.training = False
     
     params = get_ppo_params()
     
@@ -284,6 +307,23 @@ def train():
     print(f"Starting PPO training for {args.total_timesteps} timesteps...")
     print(f"Target Model: {MODEL_DIR}/ppo_model_{timestamp}.zip")
     
+    # Setup Evaluation and Early Stopping
+    stop_train_callback = StopTrainingOnNoModelImprovement(
+        max_no_improvement_evals=EARLY_STOPPING_PATIENCE,
+        min_evals=3,
+        verbose=1
+    )
+    
+    eval_callback = EvalCallback(
+        eval_env,
+        callback_after_eval=stop_train_callback,
+        best_model_save_path=MODEL_DIR,
+        log_path=LOG_DIR,
+        eval_freq=max(1, 200_000 // args.num_envs),
+        deterministic=True,
+        render=False
+    )
+    
     model.learn(
         total_timesteps=args.total_timesteps,
         progress_bar=True,
@@ -307,7 +347,8 @@ def train():
                 name_prefix="ppo_checkpoint",
                 save_vecnormalize=True,
                 verbose=1
-            )
+            ),
+            eval_callback
         ]
     )
     
