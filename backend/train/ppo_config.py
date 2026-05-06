@@ -35,7 +35,7 @@ DRAWDOWN_THRESHOLD_HARD = 0.12   # Severe exit-forcing DD penalty (12%)
 SOFT_PENALTY_SCALE = 0.2         # Gentle slope for soft penalty
 HARD_PENALTY_SCALE = 1.0         # Sharp slope for hard penalty
 MIN_OPTION_PRICE = 5.0          # Minimum price to allow trade entry
-ENTRY_PENALTY = 0.0002          # Reduced to allow more exploration without instant bankruptcy
+ENTRY_PENALTY = 0.0001          # Reduced to allow more exploration without instant bankruptcy
 MIN_TRADE_VALUE = 50000.0       # Minimum trade value to dilute fixed commissions
 DRAWDOWN_PENALTY_MULTIPLIER = 0.25 # Increased to penalize lack of risk control
 
@@ -60,8 +60,8 @@ COMMISSION_TIERS = [
 COMMISSION_TIER_DEFAULT = 0.5    # 10+ steps → 0.5× commission
 
 # --- Regime & Stale Penalties ---
-MAX_STALE_DURATION = 20
-STALE_PENALTY_MULTIPLIER = 0.005
+MAX_STALE_DURATION = 50
+STALE_PENALTY_MULTIPLIER = 0.0005
 REGIME_VOL_LOW = 0.15
 REGIME_VOL_HIGH = 0.25
 EARLY_STOPPING_PATIENCE = 5
