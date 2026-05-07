@@ -27,8 +27,9 @@ LOOKBACK_WINDOW = 30 # Number of previous steps to include in observation
 FIXED_COMMISSION = 20.0 # Per order side (Upstox)
 
 # --- Reward Tuning ---
-PATIENCE_BONUS = 0.00005         # Tiebreaker only — no longer dominates capital return signal
-REWARD_SCALE = 10.0              # Scale capital-change reward to be dominant signal
+PATIENCE_BONUS = 0.00002         # Slightly increased to incentivize patience without masking bleed
+REWARD_SCALE = 20.0              # Amplified signal to overcome friction
+PARTICIPATION_REWARD = 0.001     # Increased incentive for quality trades
 VOLATILITY_EXPANSION_BONUS = 0.001 # Small bonus for every step held during high vol
 DRAWDOWN_THRESHOLD_SOFT = 0.06   # Early warning DD penalty (6%)
 DRAWDOWN_THRESHOLD_HARD = 0.12   # Severe exit-forcing DD penalty (12%)
@@ -40,8 +41,8 @@ MIN_TRADE_VALUE = 50000.0       # Minimum trade value to dilute fixed commission
 DRAWDOWN_PENALTY_MULTIPLIER = 0.25 # Increased to penalize lack of risk control
 
 # --- Architecture Constants ---
-# (2*5*4) Greeks + (2*2) Prices + 3 Pos + 6 Tech + 3 Temp + 2 Risk = 58
-STATIC_PER_SYMBOL_FEATURES = 58 
+# (2*5*4) Greeks + (2*2) Prices + 3 Pos + 6 Tech + 3 Temp + 2 Risk = 78
+STATIC_PER_SYMBOL_FEATURES = 78 
 EXTERNAL_FEATURES_COUNT = 18    # Number of global external features + 1 for Regime Signal
 
 def get_obs_size(lookback, slots):
@@ -60,8 +61,8 @@ COMMISSION_TIERS = [
 COMMISSION_TIER_DEFAULT = 0.5    # 10+ steps → 0.5× commission
 
 # --- Regime & Stale Penalties ---
-MAX_STALE_DURATION = 50
-STALE_PENALTY_MULTIPLIER = 0.0005
+MAX_STALE_DURATION = 100         # Tightened from 250 to punish Theta decay exposure
+STALE_PENALTY_MULTIPLIER = 0.0001 # 5x reduction to prevent 'exit panic'
 REGIME_VOL_LOW = 0.15
 REGIME_VOL_HIGH = 0.25
 EARLY_STOPPING_PATIENCE = 5
@@ -132,7 +133,7 @@ def get_ppo_params():
         "gamma": 0.99,
         "gae_lambda": 0.95,
         "clip_range": 0.15,         # Tightened further: 44% clip fraction was way too high
-        "ent_coef": 0.01,           # Reduced initial entropy to lower policy randomness
+        "ent_coef": 0.02,           # Increased to force exploration and break 'Hold' paralysis
         "verbose": 1,
         "device": "auto" # Use CUDA if available
     }

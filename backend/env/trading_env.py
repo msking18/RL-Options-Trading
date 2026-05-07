@@ -16,7 +16,8 @@ from backend.train.ppo_config import (
     MIN_HOLD_STEPS, MIN_OPTION_PRICE, ENTRY_PENALTY, MAX_TRADES_PER_DAY,
     DRAWDOWN_PENALTY_MULTIPLIER, MIN_TRADE_VALUE, STATIC_PER_SYMBOL_FEATURES,
     REWARD_SCALE, SIM_AGGRESSION, VOLATILITY_EXPANSION_BONUS,
-    REGIME_VOL_LOW, REGIME_VOL_HIGH, MAX_STALE_DURATION, STALE_PENALTY_MULTIPLIER
+    REGIME_VOL_LOW, REGIME_VOL_HIGH, MAX_STALE_DURATION, STALE_PENALTY_MULTIPLIER,
+    PARTICIPATION_REWARD
 )
 
 class TradingEnv(gym.Env):
@@ -115,7 +116,11 @@ class TradingEnv(gym.Env):
             greek_cols = []
             for e in [0, 1]:
                 for i in range(-2, 3):
-                    greek_cols.extend([f'e{e}_s{i}_delta', f'e{e}_s{i}_gamma', f'e{e}_s{i}_theta', f'e{e}_s{i}_vega'])
+                    # Added Put Greeks to tensor for symmetric observation and simulation
+                    greek_cols.extend([
+                        f'e{e}_s{i}_delta', f'e{e}_s{i}_gamma', f'e{e}_s{i}_theta', f'e{e}_s{i}_vega',
+                        f'e{e}_s{i}_put_delta', f'e{e}_s{i}_put_theta'
+                    ])
             tech_cols = ['RSI', 'ATR', 'Index_Vol', 'EMA_50', 'EMA_200']
             price_cols = ['e0_call_price', 'e0_put_price', 'e1_call_price', 'e1_put_price']
             
@@ -397,12 +402,18 @@ class TradingEnv(gym.Env):
                 d1 = (np.log(spot / strike) + (rate + 0.5 * vol**2) * T) / (vol * np.sqrt(T))
                 d2 = d1 - vol * np.sqrt(T)
                 
-                df[f'e{e_idx}_s{i}_delta'] = norm.cdf(d1)
+                delta_call = norm.cdf(d1)
+                df[f'e{e_idx}_s{i}_delta'] = delta_call
                 df[f'e{e_idx}_s{i}_gamma'] = norm.pdf(d1) / (spot * vol * np.sqrt(T)) * 100
                 theta_call = (- (spot * norm.pdf(d1) * vol) / (2 * np.sqrt(T)) 
                              - rate * strike * np.exp(-rate * T) * norm.cdf(d2)) / 365.0
                 df[f'e{e_idx}_s{i}_theta'] = theta_call
                 df[f'e{e_idx}_s{i}_vega'] = (spot * norm.pdf(d1) * np.sqrt(T)) / 100.0
+                
+                # Added Put Specific Greeks for symmetry and accurate SL/TP simulation
+                df[f'e{e_idx}_s{i}_put_delta'] = delta_call - 1.0
+                df[f'e{e_idx}_s{i}_put_theta'] = (- (spot * norm.pdf(d1) * vol) / (2 * np.sqrt(T)) 
+                                                 + rate * strike * np.exp(-rate * T) * norm.cdf(-d2)) / 365.0
                 
             # ATM Prices (e_idx case)
             d1_atm = (np.log(spot / atm_strike) + (rate + 0.5 * vol**2) * T) / (vol * np.sqrt(T))
@@ -447,13 +458,16 @@ class TradingEnv(gym.Env):
             norm_vol = (np.log1p(windows[:, :, self.idx_volume]) / 15.0).reshape(len(active_slots), -1)
             norm_oi = (np.log1p(windows[:, :, self.idx_oi]) / 20.0).reshape(len(active_slots), -1)
             
-            # 3. Multi-Expiry Greeks (e0 and e1 - 40 features total)
+            # 3. Multi-Expiry Greeks (e0 and e1 - 60 features total)
             # Greek columns follow timestamp in our tensor_cols definition
             greeks_start = self.idx_timestamp + 1
-            greeks = current_data[:, greeks_start : greeks_start + 40].copy()
-            greeks[:, 1::4] *= 0.1  # Gamma scaling
-            greeks[:, 2::4] *= 0.01 # Theta scaling
-            greeks[:, 3::4] *= 0.01 # Vega scaling
+            greeks = current_data[:, greeks_start : greeks_start + 60].copy()
+            
+            # Vectorized scaling for 6-feature segments per strike: [delta, gamma, theta, vega, put_delta, put_theta]
+            greeks[:, 1::6] *= 0.1  # Gamma scaling
+            greeks[:, 2::6] *= 0.01 # Theta scaling (Call)
+            greeks[:, 3::6] *= 0.01 # Vega scaling
+            greeks[:, 5::6] *= 0.01 # Theta scaling (Put)
 
             # 4. Expiry Option Prices (4 features: Call0, Put0, Call1, Put1)
             spots = current_data[:, self.idx_close]
@@ -510,8 +524,8 @@ class TradingEnv(gym.Env):
             sym_features[:, f_idx : f_idx + lb*4] = norm_ohlc; f_idx += lb*4
             sym_features[:, f_idx : f_idx + lb] = norm_vol; f_idx += lb
             sym_features[:, f_idx : f_idx + lb] = norm_oi; f_idx += lb
-            # Greeks (40)
-            sym_features[:, f_idx : f_idx + 40] = greeks; f_idx += 40
+            # Greeks (60)
+            sym_features[:, f_idx : f_idx + 60] = greeks; f_idx += 60
             # Opt Prices (4)
             sym_features[:, f_idx : f_idx + 4] = opt_prices; f_idx += 4
             # Pos Val (1), Type (1), Dur (1)
@@ -807,9 +821,14 @@ class TradingEnv(gym.Env):
             spot_move_against = np.where(p_types == 1, spot_close - spot_low, spot_high - spot_close)
             spot_move_against = np.maximum(0, spot_move_against)
             
+            # Use symmetric delta logic: Put Delta = Call Delta - 1
+            # For SL/TP approximation, we need the absolute sensitivity to the spot move.
+            # Sensitivity for Calls is p_deltas, for Puts it is (1 - p_deltas)
+            p_sensitivities = np.where(p_types == 1, p_deltas, 1.0 - p_deltas)
+            
             # Relaxed Intra-Candle logic: Apply configurable SIM_AGGRESSION factor
             # to reduce 'noise' exits. (Reduced from 0.7 to 0.4 via ppo_config)
-            opt_low_approx = close_prices - (spot_move_against * p_deltas * SIM_AGGRESSION)
+            opt_low_approx = close_prices - (spot_move_against * p_sensitivities * SIM_AGGRESSION)
             
             # Check for SL hits (Removed 1.05x aggressive buffer)
             entries = self.state_manager.pos_entry_price[a_idx]
@@ -819,7 +838,7 @@ class TradingEnv(gym.Env):
             # Check for TP hits (Removed 0.95x aggressive buffer)
             spot_move_favor = np.where(p_types == 1, spot_high - spot_close, spot_close - spot_low)
             spot_move_favor = np.maximum(0, spot_move_favor)
-            opt_high_approx = close_prices + (spot_move_favor * p_deltas * SIM_AGGRESSION) 
+            opt_high_approx = close_prices + (spot_move_favor * p_sensitivities * SIM_AGGRESSION) 
             tp_prices = self.state_manager.pos_tp_price[a_idx]
             tp_hits = (tp_prices > 0) & (opt_high_approx >= tp_prices)
             
@@ -850,6 +869,7 @@ class TradingEnv(gym.Env):
                 
                 # Update hold_dur and peaks
                 pnl_pcts = (close_prices[remaining] - entries[remaining]) / entries[remaining]
+                stale_durations = self.state_manager.pos_hold_dur[r_idx]
                 self.state_manager.pos_peak_pnl[r_idx] = np.maximum(self.state_manager.pos_peak_pnl[r_idx], pnl_pcts)
                 
                 # Tiered Drawdown Penalty on remaining positions
@@ -862,16 +882,19 @@ class TradingEnv(gym.Env):
                 vols = nxt_data[remaining, self.idx_vol]
                 vol_bonus = np.where(vols > VOL_SCALE_MED_THRESHOLD, VOLATILITY_EXPANSION_BONUS, 0.0)
                 
-                # Stale Position Penalty
-                # Track self.state_manager.pos_hold_dur and penalize if > MAX_STALE_DURATION and PnL is flat/negative
-                stale_durations = self.state_manager.pos_hold_dur[r_idx]
+                # Participation Reward: Grant a small bonus for opening and holding a trade past the minimum steps
+                # This offsets the ENTRY_PENALTY and commissions for semi-competent trades.
+                participation_bonuses = np.where(stale_durations == MIN_HOLD_STEPS, PARTICIPATION_REWARD, 0.0)
+                
+                # Stale Position Penalty (using updated constants)
+                # Penalize if > MAX_STALE_DURATION and PnL is flat/negative
                 stale_penalties = np.where(
                     (stale_durations > MAX_STALE_DURATION) & (pnl_pcts <= 0.005),
                     STALE_PENALTY_MULTIPLIER * (stale_durations - MAX_STALE_DURATION),
                     0.0
                 )
                 
-                total_penalty += (np.sum(pen) + np.sum(stale_penalties) - np.sum(vol_bonus))
+                total_penalty += (np.sum(pen) + np.sum(stale_penalties) - np.sum(vol_bonus) - np.sum(participation_bonuses))
 
         self.state_manager._update_total_capital()
         new_capital = self.state_manager.total_capital
