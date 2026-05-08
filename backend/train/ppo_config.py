@@ -8,7 +8,7 @@ EVAL_DIR = os.path.join(REPORT_DIR, "evaluations")
 LOG_DIR = os.getenv("LOG_DIR", "ppo_trading_tensorboard")
 
 # --- Training Configuration ---
-TOTAL_TIMESTEPS = 5_000_000 # Increased for vectorized environment depth
+TOTAL_TIMESTEPS = 3_000_000 # Reduced: policy collapses after ~3.2M steps consistently
 
 # --- Annealing Configuration ---
 INITIAL_LR = 3e-5               # Reduced from 5e-5 to dampen late-training policy oscillation
@@ -27,23 +27,22 @@ LOOKBACK_WINDOW = 30 # Number of previous steps to include in observation
 FIXED_COMMISSION = 20.0 # Per order side (Upstox)
 
 # --- Reward Tuning ---
-PATIENCE_BONUS = 0.00002         # Slightly increased to incentivize patience without masking bleed
-REWARD_SCALE = 20.0              # Amplified signal to overcome friction
-PARTICIPATION_REWARD = 0.001     # Increased incentive for quality trades
+PATIENCE_BONUS = 0.00005         # Tiebreaker only — no longer dominates capital return signal
+REWARD_SCALE = 10.0              # Scale capital-change reward to be dominant signal (benchmark proven)
 VOLATILITY_EXPANSION_BONUS = 0.001 # Small bonus for every step held during high vol
 DRAWDOWN_THRESHOLD_SOFT = 0.06   # Early warning DD penalty (6%)
 DRAWDOWN_THRESHOLD_HARD = 0.12   # Severe exit-forcing DD penalty (12%)
 SOFT_PENALTY_SCALE = 0.2         # Gentle slope for soft penalty
 HARD_PENALTY_SCALE = 1.0         # Sharp slope for hard penalty
 MIN_OPTION_PRICE = 5.0          # Minimum price to allow trade entry
-ENTRY_PENALTY = 0.0001          # Reduced to allow more exploration without instant bankruptcy
+ENTRY_PENALTY = 0.0002          # Penalty per entry to deter micro-trading (benchmark value)
 MIN_TRADE_VALUE = 50000.0       # Minimum trade value to dilute fixed commissions
 DRAWDOWN_PENALTY_MULTIPLIER = 0.25 # Increased to penalize lack of risk control
 
 # --- Architecture Constants ---
-# (2*5*4) Greeks + (2*2) Prices + 3 Pos + 6 Tech + 3 Temp + 2 Risk = 78
-STATIC_PER_SYMBOL_FEATURES = 78 
-EXTERNAL_FEATURES_COUNT = 18    # Number of global external features + 1 for Regime Signal
+# (2*5*4) Call Greeks + (2*2) Prices + 3 Pos + 6 Tech + 3 Temp + 2 Risk = 58
+STATIC_PER_SYMBOL_FEATURES = 58 
+EXTERNAL_FEATURES_COUNT = 18    # 17 macro/sentiment/event features + 1 for Regime Signal
 
 def get_obs_size(lookback, slots):
     """Calculates the total observation size for the given architecture."""
@@ -61,8 +60,8 @@ COMMISSION_TIERS = [
 COMMISSION_TIER_DEFAULT = 0.5    # 10+ steps → 0.5× commission
 
 # --- Regime & Stale Penalties ---
-MAX_STALE_DURATION = 100         # Tightened from 250 to punish Theta decay exposure
-STALE_PENALTY_MULTIPLIER = 0.0001 # 5x reduction to prevent 'exit panic'
+MAX_STALE_DURATION = 200         # Generous window before penalizing stale positions
+STALE_PENALTY_MULTIPLIER = 0.00005 # Very gentle — avoid exit panic
 REGIME_VOL_LOW = 0.15
 REGIME_VOL_HIGH = 0.25
 EARLY_STOPPING_PATIENCE = 5
@@ -132,8 +131,8 @@ def get_ppo_params():
         "n_steps": 2048,
         "gamma": 0.99,
         "gae_lambda": 0.95,
-        "clip_range": 0.15,         # Tightened further: 44% clip fraction was way too high
-        "ent_coef": 0.02,           # Increased to force exploration and break 'Hold' paralysis
+        "clip_range": 0.12,         # Tightened to prevent policy instability (benchmark was 0.15, but 29.5% clip fraction demands tighter)
+        "ent_coef": 0.01,           # Reduced initial entropy to lower policy randomness (benchmark value)
         "verbose": 1,
         "device": "auto" # Use CUDA if available
     }

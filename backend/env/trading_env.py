@@ -16,8 +16,7 @@ from backend.train.ppo_config import (
     MIN_HOLD_STEPS, MIN_OPTION_PRICE, ENTRY_PENALTY, MAX_TRADES_PER_DAY,
     DRAWDOWN_PENALTY_MULTIPLIER, MIN_TRADE_VALUE, STATIC_PER_SYMBOL_FEATURES,
     REWARD_SCALE, SIM_AGGRESSION, VOLATILITY_EXPANSION_BONUS,
-    REGIME_VOL_LOW, REGIME_VOL_HIGH, MAX_STALE_DURATION, STALE_PENALTY_MULTIPLIER,
-    PARTICIPATION_REWARD
+    REGIME_VOL_LOW, REGIME_VOL_HIGH, MAX_STALE_DURATION, STALE_PENALTY_MULTIPLIER
 )
 
 class TradingEnv(gym.Env):
@@ -458,16 +457,23 @@ class TradingEnv(gym.Env):
             norm_vol = (np.log1p(windows[:, :, self.idx_volume]) / 15.0).reshape(len(active_slots), -1)
             norm_oi = (np.log1p(windows[:, :, self.idx_oi]) / 20.0).reshape(len(active_slots), -1)
             
-            # 3. Multi-Expiry Greeks (e0 and e1 - 60 features total)
+            # 3. Multi-Expiry Greeks (e0 and e1 - extract 40 Call Greeks from 60 total)
             # Greek columns follow timestamp in our tensor_cols definition
+            # Tensor stores 6 features per strike: [delta, gamma, theta, vega, put_delta, put_theta]
+            # We only pass Call Greeks [delta, gamma, theta, vega] to the observation (benchmark parity)
+            # Put Greeks remain in tensor for SL/TP simulation in step()
             greeks_start = self.idx_timestamp + 1
-            greeks = current_data[:, greeks_start : greeks_start + 60].copy()
-            
-            # Vectorized scaling for 6-feature segments per strike: [delta, gamma, theta, vega, put_delta, put_theta]
-            greeks[:, 1::6] *= 0.1  # Gamma scaling
-            greeks[:, 2::6] *= 0.01 # Theta scaling (Call)
-            greeks[:, 3::6] *= 0.01 # Vega scaling
-            greeks[:, 5::6] *= 0.01 # Theta scaling (Put)
+            raw_greeks = current_data[:, greeks_start : greeks_start + 60]
+            # Select 4-feature Call Greeks from each 6-feature group (10 groups = 5 strikes x 2 expiries)
+            call_greek_indices = []
+            for g in range(10):
+                base = g * 6
+                call_greek_indices.extend([base, base+1, base+2, base+3])
+            greeks = raw_greeks[:, call_greek_indices].copy()
+            # Vectorized scaling for 4-feature segments: [delta, gamma, theta, vega]
+            greeks[:, 1::4] *= 0.1  # Gamma scaling
+            greeks[:, 2::4] *= 0.01 # Theta scaling
+            greeks[:, 3::4] *= 0.01 # Vega scaling
 
             # 4. Expiry Option Prices (4 features: Call0, Put0, Call1, Put1)
             spots = current_data[:, self.idx_close]
@@ -524,8 +530,8 @@ class TradingEnv(gym.Env):
             sym_features[:, f_idx : f_idx + lb*4] = norm_ohlc; f_idx += lb*4
             sym_features[:, f_idx : f_idx + lb] = norm_vol; f_idx += lb
             sym_features[:, f_idx : f_idx + lb] = norm_oi; f_idx += lb
-            # Greeks (60)
-            sym_features[:, f_idx : f_idx + 60] = greeks; f_idx += 60
+            # Greeks (40 Call Greeks)
+            sym_features[:, f_idx : f_idx + 40] = greeks; f_idx += 40
             # Opt Prices (4)
             sym_features[:, f_idx : f_idx + 4] = opt_prices; f_idx += 4
             # Pos Val (1), Type (1), Dur (1)
@@ -882,9 +888,6 @@ class TradingEnv(gym.Env):
                 vols = nxt_data[remaining, self.idx_vol]
                 vol_bonus = np.where(vols > VOL_SCALE_MED_THRESHOLD, VOLATILITY_EXPANSION_BONUS, 0.0)
                 
-                # Participation Reward: Grant a small bonus for opening and holding a trade past the minimum steps
-                # This offsets the ENTRY_PENALTY and commissions for semi-competent trades.
-                participation_bonuses = np.where(stale_durations == MIN_HOLD_STEPS, PARTICIPATION_REWARD, 0.0)
                 
                 # Stale Position Penalty (using updated constants)
                 # Penalize if > MAX_STALE_DURATION and PnL is flat/negative
@@ -894,7 +897,7 @@ class TradingEnv(gym.Env):
                     0.0
                 )
                 
-                total_penalty += (np.sum(pen) + np.sum(stale_penalties) - np.sum(vol_bonus) - np.sum(participation_bonuses))
+                total_penalty += (np.sum(pen) + np.sum(stale_penalties) - np.sum(vol_bonus))
 
         self.state_manager._update_total_capital()
         new_capital = self.state_manager.total_capital
