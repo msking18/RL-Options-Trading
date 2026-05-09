@@ -22,6 +22,7 @@ rich
 # Reporting & Visualization
 xlsxwriter
 tensorboard
+watchdog
 
 # Cloud Integration
 google-cloud-storage

@@ -534,8 +534,7 @@ class TradingEnv(gym.Env):
             sym_features[:, f_idx : f_idx + 40] = greeks; f_idx += 40
             # Opt Prices (4)
             sym_features[:, f_idx : f_idx + 4] = opt_prices; f_idx += 4
-            # Pos Val (1), Type (1), Dur (1)
-            sym_features[:, f_idx] = curr_vals / self.initial_capital; f_idx += 1
+            # Pos Type (1), Dur (1)
             sym_features[:, f_idx] = (pos_types > 0).astype(np.float32); f_idx += 1
             sym_features[:, f_idx] = durations; f_idx += 1
             # Indicators (5)
@@ -544,7 +543,6 @@ class TradingEnv(gym.Env):
             sym_features[:, f_idx] = vols; f_idx += 1
             sym_features[:, f_idx] = rel_rets; f_idx += 1
             sym_features[:, f_idx] = emas_trend; f_idx += 1
-            sym_features[:, f_idx] = trailing_drawdowns; f_idx += 1
             # Temporal (3)
             sym_features[:, f_idx] = dtes; f_idx += 1
             sym_features[:, f_idx] = dows; f_idx += 1

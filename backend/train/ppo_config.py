@@ -8,12 +8,12 @@ EVAL_DIR = os.path.join(REPORT_DIR, "evaluations")
 LOG_DIR = os.getenv("LOG_DIR", "ppo_trading_tensorboard")
 
 # --- Training Configuration ---
-TOTAL_TIMESTEPS = 3_000_000 # Reduced: policy collapses after ~3.2M steps consistently
+TOTAL_TIMESTEPS = 5_000_000 # Increased budget for stabilization post-regression
 
 # --- Annealing Configuration ---
-INITIAL_LR = 3e-5               # Reduced from 5e-5 to dampen late-training policy oscillation
+INITIAL_LR = 2e-5               # Lowered for better convergence stability
 FINAL_LR = 1e-5                 # Terminal learning rate
-ENT_COEF_MIN = 0.002            # Floor for entropy — never anneal to zero to preserve exploitation
+ENT_COEF_MIN = 0.003            # Adjusted floor to maintain exploration longer
 
 # --- Stability Guard ---
 CLIP_FRACTION_THRESHOLD = 0.35  # Early-stop if clip_fraction exceeds this for CLIP_PATIENCE intervals
@@ -40,8 +40,8 @@ MIN_TRADE_VALUE = 50000.0       # Minimum trade value to dilute fixed commission
 DRAWDOWN_PENALTY_MULTIPLIER = 0.25 # Increased to penalize lack of risk control
 
 # --- Architecture Constants ---
-# (2*5*4) Call Greeks + (2*2) Prices + 3 Pos + 6 Tech + 3 Temp + 2 Risk = 58
-STATIC_PER_SYMBOL_FEATURES = 58 
+# (2*5*4) Call Greeks + (2*2) Prices + 1 Pos + 6 Tech + 3 Temp + 2 Risk = 56
+STATIC_PER_SYMBOL_FEATURES = 56 
 EXTERNAL_FEATURES_COUNT = 18    # 17 macro/sentiment/event features + 1 for Regime Signal
 
 def get_obs_size(lookback, slots):
@@ -132,7 +132,7 @@ def get_ppo_params():
         "gamma": 0.99,
         "gae_lambda": 0.95,
         "clip_range": 0.12,         # Tightened to prevent policy instability (benchmark was 0.15, but 29.5% clip fraction demands tighter)
-        "ent_coef": 0.01,           # Reduced initial entropy to lower policy randomness (benchmark value)
+        "ent_coef": 0.008,           # Restored to May 1st benchmark value
         "verbose": 1,
         "device": "auto" # Use CUDA if available
     }
