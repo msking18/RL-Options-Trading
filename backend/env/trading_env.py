@@ -195,7 +195,7 @@ class TradingEnv(gym.Env):
         self.high_water_mark = initial_capital
 
         # Pre-allocate Observation Buffer (NumPy array)
-        self.per_symbol_segment_size = (self.lookback_window * 6) + STATIC_PER_SYMBOL_FEATURES
+        self.per_symbol_segment_size = (self.lookback_window * 8) + STATIC_PER_SYMBOL_FEATURES
         self.total_obs_size = (self.per_symbol_segment_size * self.total_slots) + 2 + len(self.external_features_cols) + 1 # +1 for Regime Signal
         self.obs_buffer = np.zeros(self.total_obs_size, dtype=np.float32)
         
@@ -428,7 +428,7 @@ class TradingEnv(gym.Env):
     def _get_obs(self):
         """
         Ultra-high-performance fully vectorized 3D observation generation.
-        Expanded to include multi-expiry Greeks, prices, and temporal features.
+        Expanded to include symmetric Greeks (Call/Put) and technical indicator history.
         """
         # 1. Global Portfolio State
         self.obs_buffer[0] = self.state_manager.total_capital / self.initial_capital
@@ -448,45 +448,44 @@ class TradingEnv(gym.Env):
             windows = self.data_tensor[active_sym_idxs, self.current_step - lb : self.current_step, :]
             current_data = self.data_tensor[active_sym_idxs, self.current_step, :]
             
-            # 2. Vectorized Normalization (3D)
+            # 2. Vectorized Normalization (3D Temporal History)
+            # Channels: [Open, High, Low, Close, Volume, OI, RSI, Index_Vol]
             base_prices = windows[:, 0, self.idx_close].reshape(-1, 1, 1)
             base_prices[base_prices == 0] = 1.0
             
-            # Optimized slicing and reshaping
-            norm_ohlc = (windows[:, :, self.idx_open : self.idx_close+1] / base_prices).reshape(len(active_slots), -1)
-            norm_vol = (np.log1p(windows[:, :, self.idx_volume]) / 15.0).reshape(len(active_slots), -1)
-            norm_oi = (np.log1p(windows[:, :, self.idx_oi]) / 20.0).reshape(len(active_slots), -1)
+            # Combined 8-channel history: [OHLC(4), Vol(1), OI(1), RSI(1), IndexVol(1)] * lb
+            # We reshape to [slots, channels * lb] for the buffer
+            hist_8ch = np.zeros((len(active_slots), lb, 8), dtype=np.float32)
+            hist_8ch[:, :, :4] = (windows[:, :, self.idx_open : self.idx_close+1] / base_prices)
+            hist_8ch[:, :, 4] = np.log1p(windows[:, :, self.idx_volume]) / 15.0
+            hist_8ch[:, :, 5] = np.log1p(windows[:, :, self.idx_oi]) / 20.0
+            hist_8ch[:, :, 6] = (windows[:, :, self.idx_rsi] - 50.0) / 50.0
+            hist_8ch[:, :, 7] = windows[:, :, self.idx_vol]
+            hist_flat = hist_8ch.reshape(len(active_slots), -1)
             
-            # 3. Multi-Expiry Greeks (e0 and e1 - extract 40 Call Greeks from 60 total)
-            # Greek columns follow timestamp in our tensor_cols definition
-            # Tensor stores 6 features per strike: [delta, gamma, theta, vega, put_delta, put_theta]
-            # We only pass Call Greeks [delta, gamma, theta, vega] to the observation (benchmark parity)
-            # Put Greeks remain in tensor for SL/TP simulation in step()
+            # 3. Symmetric Multi-Expiry Greeks (60 features total: 5 strikes x 2 expiries x 6 greeks)
+            # Features: [Delta, Gamma, Theta, Vega, PutDelta, PutTheta]
             greeks_start = self.idx_timestamp + 1
-            raw_greeks = current_data[:, greeks_start : greeks_start + 60]
-            # Select 4-feature Call Greeks from each 6-feature group (10 groups = 5 strikes x 2 expiries)
-            call_greek_indices = []
-            for g in range(10):
-                base = g * 6
-                call_greek_indices.extend([base, base+1, base+2, base+3])
-            greeks = raw_greeks[:, call_greek_indices].copy()
-            # Vectorized scaling for 4-feature segments: [delta, gamma, theta, vega]
-            greeks[:, 1::4] *= 0.1  # Gamma scaling
-            greeks[:, 2::4] *= 0.01 # Theta scaling
-            greeks[:, 3::4] *= 0.01 # Vega scaling
+            greeks = current_data[:, greeks_start : greeks_start + 60].copy()
+            
+            # Vectorized scaling for 6-feature segments
+            # Indices relative to each strike block: [0:D, 1:G, 2:T, 3:V, 4:pD, 5:pT]
+            for i in range(10): # 10 blocks (5 strikes x 2 expiries)
+                base = i * 6
+                greeks[:, base + 1] *= 0.1  # Gamma scaling
+                greeks[:, base + 2] *= 0.01 # Theta scaling
+                greeks[:, base + 3] *= 0.01 # Vega scaling
+                greeks[:, base + 5] *= 0.01 # Put Theta scaling
 
             # 4. Expiry Option Prices (4 features: Call0, Put0, Call1, Put1)
             spots = current_data[:, self.idx_close]
             prices_idx = self.idx_call_e0
             opt_prices = current_data[:, prices_idx : prices_idx + 4] / spots.reshape(-1, 1)
             
-            # 5. Technicals + Metrics (Already 3D)
-            rsis = (current_data[:, self.idx_rsi] - 50.0) / 50.0
+            # 5. Technicals + Metrics (Static Snapshot)
             atrs = np.where(spots > 1.0, current_data[:, self.idx_atr] / spots, 0.0)
-            vols = current_data[:, self.idx_vol]
             
             # 6. Relative Returns (conviction signal)
-            # Find Nifty 50 Index Close (idx_close=3)
             nifty_idx = self.symbol_to_idx.get("Nifty 50", 0)
             nifty_close = self.data_tensor[nifty_idx, self.current_step, self.idx_close]
             nifty_ret = (nifty_close / self.data_tensor[nifty_idx, self.current_step-1, self.idx_close]) - 1.0
@@ -496,51 +495,31 @@ class TradingEnv(gym.Env):
             
             emas_trend = np.where(current_data[:, self.idx_ema50] > current_data[:, self.idx_ema200], 1.0, -1.0)
             
-            # 6. Temporal Features
+            # 7. Temporal Features
             dtes = current_data[:, self.idx_dte] / 7.0
             dows = current_data[:, self.idx_dow] / 6.0
             is_expiry = current_data[:, self.idx_is_expiry]
             
-            # 7. Position Features
+            # 8. Position Features
             entry_prices = self.state_manager.pos_entry_price[active_sym_idxs]
             pos_types = self.state_manager.pos_type[active_sym_idxs]
-            curr_vals = self.state_manager.pos_curr_value[active_sym_idxs]
             durations = np.minimum(1.0, self.state_manager.pos_hold_dur[active_sym_idxs] / 100.0)
-            peak_pnls = self.state_manager.pos_peak_pnl[active_sym_idxs]
-            
-            # PnL Calculation relative to Entry
-            # We need to know which expiry was traded for better PnL tracking in obs, 
-            # but StateManager.pos_curr_value already has the value.
-            sym_total_cap = self.initial_capital
-            pnl_pcts = np.zeros_like(entry_prices)
-            valid_pos = (entry_prices > 0)
-            if np.any(valid_pos):
-                # StateManager tracks curr_value based on the specific contract traded
-                # pnl_pct = (curr_val / qty - entry) / entry
-                pnl_pcts[valid_pos] = (curr_vals[valid_pos] / self.state_manager.pos_qty[active_sym_idxs][valid_pos] - entry_prices[valid_pos]) / entry_prices[valid_pos]
-            
-            pnl_pcts = np.clip(pnl_pcts, -2.0, 2.0)
-            trailing_drawdowns = np.clip(peak_pnls - pnl_pcts, 0.0, 2.0)
             
             # Construct Per-Symbol Feature Matrix for Fast Copying
             sym_features = np.zeros((len(active_slots), self.per_symbol_segment_size), dtype=np.float32)
             
             f_idx = 0
-            # lb*6
-            sym_features[:, f_idx : f_idx + lb*4] = norm_ohlc; f_idx += lb*4
-            sym_features[:, f_idx : f_idx + lb] = norm_vol; f_idx += lb
-            sym_features[:, f_idx : f_idx + lb] = norm_oi; f_idx += lb
-            # Greeks (40 Call Greeks)
-            sym_features[:, f_idx : f_idx + 40] = greeks; f_idx += 40
+            # Temporal History (lb*8)
+            sym_features[:, f_idx : f_idx + lb*8] = hist_flat; f_idx += lb*8
+            # Greeks (60 Symmetric Greeks)
+            sym_features[:, f_idx : f_idx + 60] = greeks; f_idx += 60
             # Opt Prices (4)
             sym_features[:, f_idx : f_idx + 4] = opt_prices; f_idx += 4
             # Pos Type (1), Dur (1)
             sym_features[:, f_idx] = (pos_types > 0).astype(np.float32); f_idx += 1
             sym_features[:, f_idx] = durations; f_idx += 1
-            # Indicators (5)
-            sym_features[:, f_idx] = rsis; f_idx += 1
+            # Indicators (3) - RSI and Vol moved to history
             sym_features[:, f_idx] = atrs; f_idx += 1
-            sym_features[:, f_idx] = vols; f_idx += 1
             sym_features[:, f_idx] = rel_rets; f_idx += 1
             sym_features[:, f_idx] = emas_trend; f_idx += 1
             # Temporal (3)

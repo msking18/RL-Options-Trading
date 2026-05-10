@@ -13,13 +13,11 @@ class Trading1DCNN(BaseFeaturesExtractor):
         
         self.lookback_window = lookback_window
         self.total_slots = total_slots
-        self.ohlcv_size = lookback_window * 6
+        self.ohlcv_size = lookback_window * 8 # Expanded to 8 channels
         self.static_per_symbol_size = STATIC_PER_SYMBOL_FEATURES 
         self.per_symbol_segment_size = self.ohlcv_size + self.static_per_symbol_size
         
         # Validation: Ensure the observation space matches our expectations
-        # total_obs = (per_symbol * slots) + 2 (Global Portfolio) + 17 (External)
-        # Note: 17 might change if EXTERNAL_FEATURES_COUNT changes, but we'll infer it
         expected_min_size = (self.per_symbol_segment_size * total_slots) + 2
         actual_size = observation_space.shape[0]
         if actual_size < expected_min_size:
@@ -29,10 +27,10 @@ class Trading1DCNN(BaseFeaturesExtractor):
                 f"with lookback {lookback_window} (per-slot size: {self.per_symbol_segment_size})."
             )
         
-        # 1D CNN for OHLCV data
-        # input shape: [batch, 6, 30] (channels, length)
+        # 1D CNN for OHLCV + Indicators data
+        # input shape: [batch, 8, 30] (channels, length)
         self.cnn = nn.Sequential(
-            nn.Conv1d(6, 32, kernel_size=3, padding=1),
+            nn.Conv1d(8, 32, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.MaxPool1d(2),
             nn.Conv1d(32, 64, kernel_size=3, padding=1),
@@ -50,7 +48,6 @@ class Trading1DCNN(BaseFeaturesExtractor):
         self.combined_per_symbol_size = cnn_output_size + self.static_per_symbol_size
         
         # Global features size
-        # total_obs = (per_symbol * 10) + global
         self.global_features_size = observation_space.shape[0] - (self.per_symbol_segment_size * total_slots)
         
         # Final output MLP
@@ -66,38 +63,32 @@ class Trading1DCNN(BaseFeaturesExtractor):
         batch_size = observations.shape[0]
         
         # 1. Extract symbol segments
-        # observations shape: [B, total_obs_size]
-        # Skip first 2 elements (Global Portfolio State: Capital, Cash)
         total_slots_size = self.total_slots * self.per_symbol_segment_size
         obs_slice = observations[:, 2 : 2 + total_slots_size]
         
-        # Guard against mismatch between Environment and Feature Extractor (e.g. lookback change)
+        # Guard against mismatch between Environment and Feature Extractor
         if obs_slice.shape[1] != total_slots_size:
             actual_size = obs_slice.shape[1]
             raise RuntimeError(
                 f"Feature Extractor Mismatch: Expected total_slots_size {total_slots_size} "
                 f"({self.total_slots} slots * {self.per_symbol_segment_size} per symbol), "
-                f"but got slice of size {actual_size}. "
-                f"Lookback Window mismatch? (Extractor expects {self.lookback_window})"
+                f"but got slice of size {actual_size}."
             )
 
         symbol_data = obs_slice.view(
             batch_size, self.total_slots, self.per_symbol_segment_size
         ) 
         
-        # 2. Split into OHLCV and Static features
-        # ohlcv data is first part of the segment
+        # 2. Split into OHLCV+Indicators (history) and Static features
         ohlcv_data = symbol_data[:, :, :self.ohlcv_size] 
         static_data = symbol_data[:, :, self.ohlcv_size:] 
         
         # 3. Vectorized CNN Pass
-        # Flatten Batch and Slots to process all together
-        # Reshape for CNN: [B*slots, length, channels] -> [B*slots, channels, length]
-        ohlcv_reshaped = ohlcv_data.reshape(batch_size * self.total_slots, self.lookback_window, 6).permute(0, 2, 1)
+        # Reshape for CNN: [B*slots, length, 8] -> [B*slots, 8, length]
+        ohlcv_reshaped = ohlcv_data.reshape(batch_size * self.total_slots, self.lookback_window, 8).permute(0, 2, 1)
         cnn_feats_all = self.cnn(ohlcv_reshaped) 
         
         # 4. Reconstruct Combined Features
-        # Reshape CNN output back to [B, slots, cnn_out]
         cnn_feats = cnn_feats_all.view(batch_size, self.total_slots, -1)
         symbol_combined = th.cat([cnn_feats, static_data], dim=2) 
         
@@ -105,7 +96,6 @@ class Trading1DCNN(BaseFeaturesExtractor):
         symbol_flat = symbol_combined.view(batch_size, -1)
         
         # 5. Extract global features
-        # Includes first 2 elements (Capital/Cash) and last N elements (External Signals)
         global_portfolio = observations[:, :2]
         external_signals = observations[:, 2 + total_slots_size:]
         global_feats = th.cat([global_portfolio, external_signals], dim=1)

@@ -11,7 +11,7 @@ LOG_DIR = os.getenv("LOG_DIR", "ppo_trading_tensorboard")
 TOTAL_TIMESTEPS = 5_000_000 # Increased budget for stabilization post-regression
 
 # --- Annealing Configuration ---
-INITIAL_LR = 2e-5               # Lowered for better convergence stability
+INITIAL_LR = 3e-5               # Increased slightly for faster adjustment in new state space
 FINAL_LR = 1e-5                 # Terminal learning rate
 ENT_COEF_MIN = 0.003            # Adjusted floor to maintain exploration longer
 
@@ -30,10 +30,10 @@ FIXED_COMMISSION = 20.0 # Per order side (Upstox)
 PATIENCE_BONUS = 0.00005         # Tiebreaker only — no longer dominates capital return signal
 REWARD_SCALE = 10.0              # Scale capital-change reward to be dominant signal (benchmark proven)
 VOLATILITY_EXPANSION_BONUS = 0.001 # Small bonus for every step held during high vol
-DRAWDOWN_THRESHOLD_SOFT = 0.06   # Early warning DD penalty (6%)
-DRAWDOWN_THRESHOLD_HARD = 0.12   # Severe exit-forcing DD penalty (12%)
+DRAWDOWN_THRESHOLD_SOFT = 0.10   # Widened to reduce noise (10%)
+DRAWDOWN_THRESHOLD_HARD = 0.20   # Severe exit-forcing DD penalty (20%)
 SOFT_PENALTY_SCALE = 0.2         # Gentle slope for soft penalty
-HARD_PENALTY_SCALE = 1.0         # Sharp slope for hard penalty
+HARD_PENALTY_SCALE = 0.5         # Death Penalty Scale (Requested: 0.5)
 MIN_OPTION_PRICE = 5.0          # Minimum price to allow trade entry
 ENTRY_PENALTY = 0.0002          # Penalty per entry to deter micro-trading (benchmark value)
 MIN_TRADE_VALUE = 50000.0       # Minimum trade value to dilute fixed commissions
@@ -41,12 +41,12 @@ DRAWDOWN_PENALTY_MULTIPLIER = 0.25 # Increased to penalize lack of risk control
 
 # --- Architecture Constants ---
 # (2*5*4) Call Greeks + (2*2) Prices + 1 Pos + 6 Tech + 3 Temp + 2 Risk = 56
-STATIC_PER_SYMBOL_FEATURES = 56 
+STATIC_PER_SYMBOL_FEATURES = 74  # Includes Symmetric Put Greeks (Delta/Theta)
 EXTERNAL_FEATURES_COUNT = 18    # 17 macro/sentiment/event features + 1 for Regime Signal
 
 def get_obs_size(lookback, slots):
     """Calculates the total observation size for the given architecture."""
-    per_symbol = (lookback * 6) + STATIC_PER_SYMBOL_FEATURES
+    per_symbol = (lookback * 8) + STATIC_PER_SYMBOL_FEATURES # Increased to 8 temporal channels
     return (per_symbol * slots) + 2 + EXTERNAL_FEATURES_COUNT
 
 # Graduated commission tiers: {max_hold_duration: multiplier}
@@ -128,10 +128,10 @@ def get_ppo_params():
     params = {
         "learning_rate": INITIAL_LR, # Centralized — see INITIAL_LR constant
         "batch_size": 1024,
-        "n_steps": 2048,
+        "n_steps": 4096,
         "gamma": 0.99,
         "gae_lambda": 0.95,
-        "clip_range": 0.12,         # Tightened to prevent policy instability (benchmark was 0.15, but 29.5% clip fraction demands tighter)
+        "clip_range": 0.15,         # Restored to baseline due to higher n_steps stability
         "ent_coef": 0.008,           # Restored to May 1st benchmark value
         "verbose": 1,
         "device": "auto" # Use CUDA if available
