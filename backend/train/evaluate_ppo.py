@@ -235,9 +235,10 @@ def evaluate_regime(model, name, symbols, start_date, end_date, preloaded_data=N
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-path", type=str, default=None)
-    parser.add_argument("--model-source", type=str, default="best_ev",
-                        choices=["best_ev", "early_stop", "latest", "path"],
+    parser.add_argument("--model-source", type=str, default="best",
+                        choices=["best", "best_ev", "early_stop", "latest", "path"],
                         help="Which model checkpoint to evaluate. "
+                             "'best' = best reward checkpoint (from EvalCallback), "
                              "'best_ev' = best explained variance checkpoint, "
                              "'early_stop' = early-stopped checkpoint, "
                              "'latest' = final model, "
@@ -257,6 +258,7 @@ def main():
     else:
         # Smart checkpoint selection
         source_map = {
+            "best":       ("best_model.zip",     "vec_normalize.pkl"),
             "best_ev":    ("ppo_best_ev.zip",    "vec_normalize_best_ev.pkl"),
             "early_stop": ("ppo_early_stop.zip", "vec_normalize_early_stop.pkl"),
             "latest":     ("ppo_latest.zip",     "vec_normalize.pkl"),

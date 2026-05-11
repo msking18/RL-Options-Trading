@@ -37,7 +37,7 @@ HARD_PENALTY_SCALE = 0.5         # Death Penalty Scale (Requested: 0.5)
 MIN_OPTION_PRICE = 5.0          # Minimum price to allow trade entry
 ENTRY_PENALTY = 0.0002          # Penalty per entry to deter micro-trading (benchmark value)
 MIN_TRADE_VALUE = 50000.0       # Minimum trade value to dilute fixed commissions
-DRAWDOWN_PENALTY_MULTIPLIER = 0.25 # Increased to penalize lack of risk control
+DRAWDOWN_PENALTY_MULTIPLIER = 0.75 # Substantially increased to penalize lack of risk control
 
 # --- Architecture Constants ---
 # (2*5*4) Call Greeks + (2*2) Prices + 1 Pos + 6 Tech + 3 Temp + 2 Risk = 56
@@ -129,10 +129,11 @@ def get_ppo_params():
         "learning_rate": INITIAL_LR, # Centralized — see INITIAL_LR constant
         "batch_size": 1024,
         "n_steps": 4096,
-        "gamma": 0.99,
+        "gamma": 0.97,              # Reduced from 0.99 to shorten horizon and stabilize EV
         "gae_lambda": 0.95,
         "clip_range": 0.15,         # Restored to baseline due to higher n_steps stability
         "ent_coef": 0.008,           # Restored to May 1st benchmark value
+        "vf_coef": 1.0,             # Increased from default 0.5 to prioritize Value Function accuracy
         "verbose": 1,
         "device": "auto" # Use CUDA if available
     }
@@ -149,6 +150,7 @@ def get_ppo_params():
         params["policy_kwargs"] = dict(
             features_extractor_class=Trading1DCNN,
             features_extractor_kwargs=dict(features_dim=512, lookback_window=LOOKBACK_WINDOW, total_slots=TOTAL_SLOTS),
+            share_features_extractor=False, # Decouple Policy and Value networks to improve EV
             net_arch=dict(pi=[256, 256], vf=[256, 256])
         )
     else:

@@ -857,8 +857,9 @@ class TradingEnv(gym.Env):
                 
                 # Tiered Drawdown Penalty on remaining positions
                 dd = self.state_manager.pos_peak_pnl[r_idx] - pnl_pcts
+                # Quadratic Hard Penalty to aggressively deter severe drawdowns
                 pen = np.where(dd > DRAWDOWN_THRESHOLD_HARD, 
-                               HARD_PENALTY_SCALE * ((dd - DRAWDOWN_THRESHOLD_HARD) * DRAWDOWN_PENALTY_MULTIPLIER),
+                               HARD_PENALTY_SCALE * (((dd - DRAWDOWN_THRESHOLD_HARD) * 100)**2 * (DRAWDOWN_PENALTY_MULTIPLIER / 100)),
                                np.where(dd > DRAWDOWN_THRESHOLD_SOFT, SOFT_PENALTY_SCALE * ((dd - DRAWDOWN_THRESHOLD_SOFT) * DRAWDOWN_PENALTY_MULTIPLIER), 0.0))
                 
                 # Volatility Expansion Bonus: Reward holding through high-volatility trends
