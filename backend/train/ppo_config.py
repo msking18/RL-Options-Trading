@@ -73,7 +73,7 @@ VOL_SCALE_MED_THRESHOLD = 0.25    # Above this vol → 75% size
 # --- Minimum Hold Period ---
 MIN_HOLD_STEPS = 5              # Increased to force the model to look for slightly longer signals
 MAX_TRADES_PER_DAY = 5          # Hard limit on trade entries per symbol per day
-SIM_AGGRESSION = 0.4            # Intra-candle SL/TP delta simulation factor (reduced from 0.7)
+SIM_AGGRESSION = 0.5            # Intra-candle SL/TP delta simulation factor
 
 USE_CNN = True         # Toggle for 1D-CNN vs MlpPolicy
 
@@ -101,14 +101,14 @@ EVAL_ONLY_SYMBOLS = [
 
 # SL/TP mapped as (StopLossPct, TakeProfitPct)
 # 0: No SL/TP (Full discretionary)
-# 1: Conservative (35% SL, 70% TP) — widened from 20%/40% to avoid noise SL hits
-# 2: Standard (50% SL, 150% TP)
-# 3: Wide (70% SL, 300% TP)
+# 1: Tight (20% SL, 40% TP)
+# 2: Conservative (35% SL, 80% TP)
+# 3: Standard (50% SL, 150% TP)
 SL_TP_CATEGORIES = [
     (0.0, 0.0),          # No SL/TP (full discretion)
-    (0.35, 0.70),        # Conservative
-    (0.50, 1.50),        # Standard
-    (0.70, 3.00)         # Wide
+    (0.20, 0.40),        # Tight
+    (0.35, 0.80),        # Conservative
+    (0.50, 1.50)         # Standard
 ]
 def load_best_params():
     """Loads tuned hyperparameters from JSON if available."""

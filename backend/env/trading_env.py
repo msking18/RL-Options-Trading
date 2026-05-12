@@ -842,7 +842,7 @@ class TradingEnv(gym.Env):
                 # Early SL Penalty: Discourage entries that hit SL within 3 steps of opening
                 early_sl_hits = sl_hits[hitter_indices] & (self.state_manager.pos_hold_dur[exit_indices] <= 3)
                 if np.any(early_sl_hits):
-                    total_penalty += np.sum(early_sl_hits) * 0.0005 
+                    total_penalty += np.sum(early_sl_hits) * 0.005 
             
             # Remaining positions update curr_value
             remaining = ~ (sl_hits | tp_hits)
@@ -857,10 +857,17 @@ class TradingEnv(gym.Env):
                 
                 # Tiered Drawdown Penalty on remaining positions
                 dd = self.state_manager.pos_peak_pnl[r_idx] - pnl_pcts
-                # Quadratic Hard Penalty to aggressively deter severe drawdowns
+                # REVISED: Linear penalty to prevent exploding gradients. 
+                # Normalize DD to a 0.0 - 1.0 scale over the threshold.
+                hard_excess = np.maximum(0.0, dd - DRAWDOWN_THRESHOLD_HARD)
+                soft_excess = np.maximum(0.0, dd - DRAWDOWN_THRESHOLD_SOFT)
+                
+                # Apply linear penalty instead of quadratic, scaled down to reasonable per-step bounds.
                 pen = np.where(dd > DRAWDOWN_THRESHOLD_HARD, 
-                               HARD_PENALTY_SCALE * (((dd - DRAWDOWN_THRESHOLD_HARD) * 100)**2 * (DRAWDOWN_PENALTY_MULTIPLIER / 100)),
-                               np.where(dd > DRAWDOWN_THRESHOLD_SOFT, SOFT_PENALTY_SCALE * ((dd - DRAWDOWN_THRESHOLD_SOFT) * DRAWDOWN_PENALTY_MULTIPLIER), 0.0))
+                               HARD_PENALTY_SCALE * hard_excess * (DRAWDOWN_PENALTY_MULTIPLIER / 100.0),
+                               np.where(dd > DRAWDOWN_THRESHOLD_SOFT, 
+                                        SOFT_PENALTY_SCALE * soft_excess * (DRAWDOWN_PENALTY_MULTIPLIER / 100.0), 
+                                        0.0))
                 
                 # Volatility Expansion Bonus: Reward holding through high-volatility trends
                 vols = nxt_data[remaining, self.idx_vol]
