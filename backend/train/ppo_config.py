@@ -151,7 +151,7 @@ def get_ppo_params():
             features_extractor_class=Trading1DCNN,
             features_extractor_kwargs=dict(features_dim=512, lookback_window=LOOKBACK_WINDOW, total_slots=TOTAL_SLOTS),
             share_features_extractor=False, # Decouple Policy and Value networks to improve EV
-            net_arch=dict(pi=[256, 256], vf=[256, 256])
+            net_arch=dict(pi=[256, 256], vf=[512, 512, 256])
         )
     else:
         print("Using Architecture: MLP (Standard Dense Layers)")

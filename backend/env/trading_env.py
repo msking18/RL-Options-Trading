@@ -594,12 +594,23 @@ class TradingEnv(gym.Env):
         flat = (pos_types == 0)
         under_limit = self.state_manager.trades_today[active_sym_idxs] < MAX_TRADES_PER_DAY
         
+        # Check current volatility for asymmetric risk masking (Suggestion 3)
+        curr_vols = self.data_tensor[active_sym_idxs, self.current_step, self.idx_vol]
+        is_high_vol = curr_vols > VOL_SCALE_HIGH_THRESHOLD
+        
         # Check current option prices for current week (e0)
         call_prices = self.data_tensor[active_sym_idxs, self.current_step, self.idx_call_e0]
         put_prices = self.data_tensor[active_sym_idxs, self.current_step, self.idx_call_e0 + 1]
         
         m[active_indices[flat & under_limit & (call_prices >= MIN_OPTION_PRICE)], 1] = True
         m[active_indices[flat & under_limit & (put_prices >= MIN_OPTION_PRICE)], 2] = True
+        
+        # If high volatility, mask out Risk option 0 (No SL) and 3 (Wide/Standard SL) for new entries
+        # Risk Categories: 0:No SL, 1:Tight, 2:Conservative, 3:Standard
+        high_vol_indices = active_indices[is_high_vol]
+        if len(high_vol_indices) > 0:
+            m[high_vol_indices, 4 + 0] = False # Mask out 'No SL'
+            m[high_vol_indices, 4 + 3] = False # Mask out 'Standard'
         
         # Exit (3) is valid only if in position AND hold duration >= MIN_HOLD_STEPS
         in_pos_ready = (pos_types > 0) & (pos_durations >= MIN_HOLD_STEPS)
@@ -862,15 +873,19 @@ class TradingEnv(gym.Env):
                 hard_excess = np.maximum(0.0, dd - DRAWDOWN_THRESHOLD_HARD)
                 soft_excess = np.maximum(0.0, dd - DRAWDOWN_THRESHOLD_SOFT)
                 
-                # Apply linear penalty instead of quadratic, scaled down to reasonable per-step bounds.
+                # Apply linear penalty, scaled by volatility if above threshold (Suggestion 3)
                 pen = np.where(dd > DRAWDOWN_THRESHOLD_HARD, 
                                HARD_PENALTY_SCALE * hard_excess * (DRAWDOWN_PENALTY_MULTIPLIER / 100.0),
                                np.where(dd > DRAWDOWN_THRESHOLD_SOFT, 
                                         SOFT_PENALTY_SCALE * soft_excess * (DRAWDOWN_PENALTY_MULTIPLIER / 100.0), 
                                         0.0))
                 
-                # Volatility Expansion Bonus: Reward holding through high-volatility trends
+                # Dynamic Volatility scaling for drawdown penalties
                 vols = nxt_data[remaining, self.idx_vol]
+                vol_penalty_scale = np.where(vols > VOL_SCALE_HIGH_THRESHOLD, 2.0, 1.0)
+                pen *= vol_penalty_scale
+                
+                # Volatility Expansion Bonus: Reward holding through high-volatility trends
                 vol_bonus = np.where(vols > VOL_SCALE_MED_THRESHOLD, VOLATILITY_EXPANSION_BONUS, 0.0)
                 
                 
