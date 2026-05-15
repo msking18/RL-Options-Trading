@@ -605,11 +605,12 @@ class TradingEnv(gym.Env):
         m[active_indices[flat & under_limit & (call_prices >= MIN_OPTION_PRICE)], 1] = True
         m[active_indices[flat & under_limit & (put_prices >= MIN_OPTION_PRICE)], 2] = True
         
-        # If high volatility, mask out Risk option 0 (No SL) and 3 (Wide/Standard SL) for new entries
+        # If high volatility, force Tight SL only (mask out all other risk options)
         # Risk Categories: 0:No SL, 1:Tight, 2:Conservative, 3:Standard
         high_vol_indices = active_indices[is_high_vol]
         if len(high_vol_indices) > 0:
             m[high_vol_indices, 4 + 0] = False # Mask out 'No SL'
+            m[high_vol_indices, 4 + 2] = False # Mask out 'Conservative'
             m[high_vol_indices, 4 + 3] = False # Mask out 'Standard'
         
         # Exit (3) is valid only if in position AND hold duration >= MIN_HOLD_STEPS

@@ -11,9 +11,9 @@ LOG_DIR = os.getenv("LOG_DIR", "ppo_trading_tensorboard")
 TOTAL_TIMESTEPS = 5_000_000 # Increased budget for stabilization post-regression
 
 # --- Annealing Configuration ---
-INITIAL_LR = 3e-5               # Increased slightly for faster adjustment in new state space
+INITIAL_LR = 2e-5               # Reduced from 3e-5 to lower clip fraction (was 0.35)
 FINAL_LR = 1e-5                 # Terminal learning rate
-ENT_COEF_MIN = 0.003            # Adjusted floor to maintain exploration longer
+ENT_COEF_MIN = 0.005            # Raised from 0.003 to prevent overfitting / zero-shot collapse
 
 # --- Stability Guard ---
 CLIP_FRACTION_THRESHOLD = 0.35  # Early-stop if clip_fraction exceeds this for CLIP_PATIENCE intervals
@@ -37,7 +37,7 @@ HARD_PENALTY_SCALE = 0.5         # Death Penalty Scale (Requested: 0.5)
 MIN_OPTION_PRICE = 5.0          # Minimum price to allow trade entry
 ENTRY_PENALTY = 0.0002          # Penalty per entry to deter micro-trading (benchmark value)
 MIN_TRADE_VALUE = 50000.0       # Minimum trade value to dilute fixed commissions
-DRAWDOWN_PENALTY_MULTIPLIER = 0.75 # Substantially increased to penalize lack of risk control
+DRAWDOWN_PENALTY_MULTIPLIER = 50.0 # Fixed: was 0.75/100=0.0075, ~500x too weak vs REWARD_SCALE=10
 
 # --- Architecture Constants ---
 # (2*5*4) Call Greeks + (2*2) Prices + 1 Pos + 6 Tech + 3 Temp + 2 Risk = 56
@@ -91,7 +91,7 @@ TRAINING_SYMBOLS = [
 
 # 2 symbols for Zero-Shot Robustness
 ZERO_SHOT_SYMBOLS = [
-    "SENSEX", "Nifty IT"
+    "Nifty Next 50", "Nifty IT"
 ]
 
 # Evaluation-only (Hidden during training)
@@ -129,9 +129,9 @@ def get_ppo_params():
         "learning_rate": INITIAL_LR, # Centralized — see INITIAL_LR constant
         "batch_size": 1024,
         "n_steps": 4096,
-        "gamma": 0.97,              # Reduced from 0.99 to shorten horizon and stabilize EV
+        "gamma": 0.95,              # Reduced from 0.97 to shorten horizon and improve EV retention
         "gae_lambda": 0.95,
-        "clip_range": 0.15,         # Restored to baseline due to higher n_steps stability
+        "clip_range": 0.20,         # Widened from 0.15 to reduce clip fraction (was 0.35)
         "ent_coef": 0.008,           # Restored to May 1st benchmark value
         "vf_coef": 1.0,             # Increased from default 0.5 to prioritize Value Function accuracy
         "verbose": 1,
@@ -151,7 +151,7 @@ def get_ppo_params():
             features_extractor_class=Trading1DCNN,
             features_extractor_kwargs=dict(features_dim=512, lookback_window=LOOKBACK_WINDOW, total_slots=TOTAL_SLOTS),
             share_features_extractor=False, # Decouple Policy and Value networks to improve EV
-            net_arch=dict(pi=[256, 256], vf=[512, 512, 256])
+            net_arch=dict(pi=[256, 256], vf=[512, 512, 512, 256])
         )
     else:
         print("Using Architecture: MLP (Standard Dense Layers)")
