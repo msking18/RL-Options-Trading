@@ -19,7 +19,7 @@ ENT_COEF_MIN = 0.005            # Raised from 0.003 to prevent overfitting / zer
 CLIP_FRACTION_THRESHOLD = 0.35  # Early-stop if clip_fraction exceeds this for CLIP_PATIENCE intervals
 CLIP_PATIENCE = 10              # Consecutive violations before early stop (~160K steps at 2048 n_steps)
 CHECKPOINT_FREQ = 500_000      # Save a checkpoint every N total timesteps
-INITIAL_CAPITAL = 1_000_000.0
+INITIAL_CAPITAL = 5_000_000.0
 MIN_SYMBOLS = 5
 MAX_SYMBOLS = 6
 TOTAL_SLOTS = 6
@@ -42,7 +42,7 @@ DRAWDOWN_PENALTY_MULTIPLIER = 50.0 # Fixed: was 0.75/100=0.0075, ~500x too weak 
 # --- Architecture Constants ---
 # (2*5*4) Call Greeks + (2*2) Prices + 1 Pos + 6 Tech + 3 Temp + 2 Risk = 56
 STATIC_PER_SYMBOL_FEATURES = 74  # Includes Symmetric Put Greeks (Delta/Theta)
-EXTERNAL_FEATURES_COUNT = 18    # 17 macro/sentiment/event features + 1 for Regime Signal
+EXTERNAL_FEATURES_COUNT = 19    # 18 macro/sentiment/event features + 1 for Regime Signal
 
 def get_obs_size(lookback, slots):
     """Calculates the total observation size for the given architecture."""
@@ -91,7 +91,7 @@ TRAINING_SYMBOLS = [
 
 # 2 symbols for Zero-Shot Robustness
 ZERO_SHOT_SYMBOLS = [
-    "Nifty Next 50", "Nifty IT"
+    "Nifty Next 50"
 ]
 
 # Evaluation-only (Hidden during training)

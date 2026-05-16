@@ -67,7 +67,7 @@ class TradingEnv(gym.Env):
             'CAC40_Ret_Lag1', 'FTSE100_Ret_Lag1', 'DAX_Ret_Lag1', 'SP500_Ret_Lag1',
             'HangSeng_Ret_Lag1', 'Nikkei225_Ret_Lag1', 'Nasdaq100_Ret_Lag1',
             'Pos_Score_Lag1', 'Neg_Score_Lag1', 'Headline_Count_Lag1',
-            'Max_Impact', 'Is_Event_Day', 'Vol_Percentile_252'
+            'Max_Impact', 'Is_Event_Day', 'Vol_Percentile_252', 'Nifty_IT_Ret_Lag1'
         ]
         
         # 4. Finalize Data (Vectorized 3D Tensor for Performance)
@@ -302,6 +302,19 @@ class TradingEnv(gym.Env):
         df = pd.merge(df, macro_df, on='Date_Only', how='left')
         df = pd.merge(df, sent_df, on='Date_Only', how='left')
         df = pd.merge(df, ev_df, on='Date_Only', how='left')
+        
+        # 3.5 Nifty IT Context (Sectoral proxy)
+        try:
+            it_df = self.db_manager.load_data("Nifty IT", start_date=self.start_date, end_date=self.end_date)
+            if not it_df.empty:
+                # Group by date to get daily returns for context
+                it_df['Date_Only'] = pd.to_datetime(it_df['time']).dt.normalize()
+                it_daily = it_df.groupby('Date_Only')['close'].last().reset_index()
+                it_daily['Nifty_IT_Ret'] = np.log(it_daily['close'] / it_daily['close'].shift(1))
+                it_daily['Nifty_IT_Ret_Lag1'] = it_daily['Nifty_IT_Ret'].shift(1)
+                df = pd.merge(df, it_daily[['Date_Only', 'Nifty_IT_Ret_Lag1']], on='Date_Only', how='left')
+        except Exception as e:
+            print(f"Warning: Could not merge Nifty IT context: {e}")
         
         # 4. Technical Indicators (ATR, RSI, Rolling Vol)
         # ATR (14)
