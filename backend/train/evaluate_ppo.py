@@ -312,7 +312,7 @@ def main():
         },
         {
             "name": "Zero-Shot Transfer (Sector Change)", 
-            "symbols": ZERO_SHOT_SYMBOLS, 
+            "symbols": TRAINING_SYMBOLS[:4] + ZERO_SHOT_SYMBOLS, 
             "start": "2025-10-01", 
             "end": "2026-04-10"
         }

@@ -20,7 +20,7 @@ CLIP_FRACTION_THRESHOLD = 0.35  # Early-stop if clip_fraction exceeds this for C
 CLIP_PATIENCE = 10              # Consecutive violations before early stop (~160K steps at 2048 n_steps)
 CHECKPOINT_FREQ = 500_000      # Save a checkpoint every N total timesteps
 INITIAL_CAPITAL = 5_000_000.0
-MIN_SYMBOLS = 5
+MIN_SYMBOLS = 1
 MAX_SYMBOLS = 6
 TOTAL_SLOTS = 6
 LOOKBACK_WINDOW = 30 # Number of previous steps to include in observation
@@ -36,7 +36,7 @@ SOFT_PENALTY_SCALE = 0.2         # Gentle slope for soft penalty
 HARD_PENALTY_SCALE = 0.5         # Death Penalty Scale (Requested: 0.5)
 MIN_OPTION_PRICE = 5.0          # Minimum price to allow trade entry
 ENTRY_PENALTY = 0.0002          # Penalty per entry to deter micro-trading (benchmark value)
-MIN_TRADE_VALUE = 50000.0       # Minimum trade value to dilute fixed commissions
+MIN_TRADE_VALUE = 250000.0       # Minimum trade value to dilute fixed commissions
 DRAWDOWN_PENALTY_MULTIPLIER = 50.0 # Fixed: was 0.75/100=0.0075, ~500x too weak vs REWARD_SCALE=10
 
 # --- Architecture Constants ---
@@ -89,7 +89,7 @@ TRAINING_SYMBOLS = [
     "Nifty 50", "Nifty Bank", "Nifty Fin Service", "Nifty Midcap Select", "SENSEX", "SENSEX50"
 ]
 
-# 2 symbols for Zero-Shot Robustness
+# 1 symbols for Zero-Shot Robustness
 ZERO_SHOT_SYMBOLS = [
     "Nifty Next 50"
 ]
