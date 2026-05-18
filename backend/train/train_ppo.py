@@ -224,7 +224,7 @@ def train():
     env = VecMonitor(env)
 
     # Apply VecNormalize for stable learning in high-dimensional finance data
-    env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=10.0, clip_reward=2.0)
+    env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=10.0, clip_reward=5.0)
 
     # Create Evaluation Environment
     eval_env = DummyVecEnv([

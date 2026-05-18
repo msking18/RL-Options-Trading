@@ -28,7 +28,7 @@ FIXED_COMMISSION = 20.0 # Per order side (Upstox)
 
 # --- Reward Tuning ---
 PATIENCE_BONUS = 0.00005         # Tiebreaker only — no longer dominates capital return signal
-REWARD_SCALE = 10.0              # Scale capital-change reward to be dominant signal (benchmark proven)
+REWARD_SCALE = 1.0               # Reduced from 10.0 to compress reward range for EV stability (Tier 1 fix)
 VOLATILITY_EXPANSION_BONUS = 0.001 # Small bonus for every step held during high vol
 DRAWDOWN_THRESHOLD_SOFT = 0.10   # Widened to reduce noise (10%)
 DRAWDOWN_THRESHOLD_HARD = 0.20   # Severe exit-forcing DD penalty (20%)
@@ -37,7 +37,7 @@ HARD_PENALTY_SCALE = 0.5         # Death Penalty Scale (Requested: 0.5)
 MIN_OPTION_PRICE = 5.0          # Minimum price to allow trade entry
 ENTRY_PENALTY = 0.0002          # Penalty per entry to deter micro-trading (benchmark value)
 MIN_TRADE_VALUE = 250000.0       # Minimum trade value to dilute fixed commissions
-DRAWDOWN_PENALTY_MULTIPLIER = 50.0 # Fixed: was 0.75/100=0.0075, ~500x too weak vs REWARD_SCALE=10
+DRAWDOWN_PENALTY_MULTIPLIER = 5.0  # Proportionally scaled with REWARD_SCALE (50/10=5) to maintain relative weight
 
 # --- Architecture Constants ---
 # (2*5*4) Call Greeks + (2*2) Prices + 1 Pos + 6 Tech + 3 Temp + 2 Risk = 56
@@ -129,6 +129,7 @@ def get_ppo_params():
         "learning_rate": INITIAL_LR, # Centralized — see INITIAL_LR constant
         "batch_size": 1024,
         "n_steps": 4096,
+        "n_epochs": 5,              # Reduced from default 10 to prevent VF overfitting on stale rollouts (Tier 1)
         "gamma": 0.95,              # Reduced from 0.97 to shorten horizon and improve EV retention
         "gae_lambda": 0.95,
         "clip_range": 0.20,         # Widened from 0.15 to reduce clip fraction (was 0.35)
