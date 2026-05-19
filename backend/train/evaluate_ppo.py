@@ -203,6 +203,18 @@ def evaluate_regime(model, name, symbols, start_date, end_date, preloaded_data=N
     
     # Final model metrics calculated on the aligned curve
     model_metrics = calculate_performance_metrics(equity_curve)
+    
+    # Override agent metrics with trade-wise calculations for parity with auto_analyzer
+    if final_trade_logs:
+        pnls = [t.get('pnl_pct', 0) for t in final_trade_logs]
+        wins = [p for p in pnls if p > 0]
+        losses = [abs(p) for p in pnls if p < 0]
+        model_metrics['win_rate_pct'] = (len(wins) / len(final_trade_logs)) * 100
+        model_metrics['profit_factor'] = sum(wins) / sum(losses) if losses and sum(losses) > 0 else (float('inf') if wins else 1.0)
+    else:
+        model_metrics['win_rate_pct'] = 0.0
+        model_metrics['profit_factor'] = 0.0
+
     bh_metrics = calculate_performance_metrics(bh_curve)
     ss_metrics = calculate_performance_metrics(ss_curve)
     ma_metrics = calculate_performance_metrics(ma_curve)

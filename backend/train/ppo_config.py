@@ -27,15 +27,15 @@ LOOKBACK_WINDOW = 30 # Number of previous steps to include in observation
 FIXED_COMMISSION = 20.0 # Per order side (Upstox)
 
 # --- Reward Tuning ---
-PATIENCE_BONUS = 0.00005         # Tiebreaker only — no longer dominates capital return signal
-REWARD_SCALE = 1.0               # Reduced from 10.0 to compress reward range for EV stability (Tier 1 fix)
+PATIENCE_BONUS = 0.0001          # Increased to encourage holding
+REWARD_SCALE = 5.0               # Increased from 1.0 to strengthen EV signal
 VOLATILITY_EXPANSION_BONUS = 0.001 # Small bonus for every step held during high vol
 DRAWDOWN_THRESHOLD_SOFT = 0.10   # Widened to reduce noise (10%)
 DRAWDOWN_THRESHOLD_HARD = 0.20   # Severe exit-forcing DD penalty (20%)
 SOFT_PENALTY_SCALE = 0.2         # Gentle slope for soft penalty
 HARD_PENALTY_SCALE = 0.5         # Death Penalty Scale (Requested: 0.5)
 MIN_OPTION_PRICE = 5.0          # Minimum price to allow trade entry
-ENTRY_PENALTY = 0.0002          # Penalty per entry to deter micro-trading (benchmark value)
+ENTRY_PENALTY = 0.0001          # Reduced to lower entry barrier and increase participation
 MIN_TRADE_VALUE = 250000.0       # Minimum trade value to dilute fixed commissions
 DRAWDOWN_PENALTY_MULTIPLIER = 5.0  # Proportionally scaled with REWARD_SCALE (50/10=5) to maintain relative weight
 
@@ -129,8 +129,8 @@ def get_ppo_params():
         "learning_rate": INITIAL_LR, # Centralized — see INITIAL_LR constant
         "batch_size": 1024,
         "n_steps": 4096,
-        "n_epochs": 5,              # Reduced from default 10 to prevent VF overfitting on stale rollouts (Tier 1)
-        "gamma": 0.95,              # Reduced from 0.97 to shorten horizon and improve EV retention
+        "n_epochs": 10,             # Increased back to 10 to improve value network fitting (EV)
+        "gamma": 0.995,             # Increased to extend the agent's time horizon
         "gae_lambda": 0.95,
         "clip_range": 0.20,         # Widened from 0.15 to reduce clip fraction (was 0.35)
         "ent_coef": 0.008,           # Restored to May 1st benchmark value
