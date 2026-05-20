@@ -16,7 +16,8 @@ from backend.train.ppo_config import (
     MIN_HOLD_STEPS, MIN_OPTION_PRICE, ENTRY_PENALTY, MAX_TRADES_PER_DAY,
     DRAWDOWN_PENALTY_MULTIPLIER, MIN_TRADE_VALUE, STATIC_PER_SYMBOL_FEATURES,
     REWARD_SCALE, SIM_AGGRESSION, VOLATILITY_EXPANSION_BONUS,
-    REGIME_VOL_LOW, REGIME_VOL_HIGH, MAX_STALE_DURATION, STALE_PENALTY_MULTIPLIER
+    REGIME_VOL_LOW, REGIME_VOL_HIGH, MAX_STALE_DURATION, STALE_PENALTY_MULTIPLIER,
+    ZERO_SHOT_SYMBOLS
 )
 
 class TradingEnv(gym.Env):
@@ -625,9 +626,35 @@ class TradingEnv(gym.Env):
             m[high_vol_indices, 4 + 0] = False # Mask out 'No SL'
             m[high_vol_indices, 4 + 2] = False # Mask out 'Conservative'
             m[high_vol_indices, 4 + 3] = False # Mask out 'Standard'
+            
+        # Suggestion 3: Disable risk_idx = 0 (No SL/TP) if volatility > VOL_SCALE_MED_THRESHOLD or in zero-shot regimes
+        is_med_vol = curr_vols > VOL_SCALE_MED_THRESHOLD
+        is_zero_shot = np.array([self.symbol_list[idx] in ZERO_SHOT_SYMBOLS for idx in active_sym_idxs])
         
-        # Exit (3) is valid only if in position AND hold duration >= MIN_HOLD_STEPS
-        in_pos_ready = (pos_types > 0) & (pos_durations >= MIN_HOLD_STEPS)
+        disable_no_sl = active_indices[is_med_vol | is_zero_shot]
+        if len(disable_no_sl) > 0:
+            m[disable_no_sl, 4 + 0] = False # Mask out 'No SL/TP'
+        
+        # Exit (3) is valid only if in position AND (hold duration >= MIN_HOLD_STEPS OR has a loss after >= 1 step)
+        # Check for loss condition: current_option_price < entry_price
+        in_pos = (pos_types > 0)
+        has_loss = np.zeros_like(in_pos, dtype=bool)
+        if np.any(in_pos):
+            in_pos_sym_idxs = active_sym_idxs[in_pos]
+            opened_e_idxs = self.state_manager.pos_expiry_index[in_pos_sym_idxs]
+            p_types = self.state_manager.pos_type[in_pos_sym_idxs]
+            
+            # Map dynamic price columns
+            opt_cols = np.where(opened_e_idxs == 0, self.idx_call_e0, self.idx_call_e1)
+            opt_cols = np.where(p_types == 2, opt_cols + 1, opt_cols) # Put option price is the next column
+            
+            # Fetch current prices and entry prices
+            curr_opt_prices = self.data_tensor[in_pos_sym_idxs, self.current_step, opt_cols]
+            entry_prices = self.state_manager.pos_entry_price[in_pos_sym_idxs]
+            
+            has_loss[in_pos] = (curr_opt_prices < entry_prices)
+            
+        in_pos_ready = (pos_types > 0) & ((pos_durations >= MIN_HOLD_STEPS) | ((pos_durations >= 1) & has_loss))
         m[active_indices[in_pos_ready], 3] = True
 
     def reset(self, seed=None, options=None):

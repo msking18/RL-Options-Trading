@@ -13,7 +13,7 @@ TOTAL_TIMESTEPS = 5_000_000 # Increased budget for stabilization post-regression
 # --- Annealing Configuration ---
 INITIAL_LR = 2e-5               # Reduced from 3e-5 to lower clip fraction (was 0.35)
 FINAL_LR = 1e-5                 # Terminal learning rate
-ENT_COEF_MIN = 0.005            # Raised from 0.003 to prevent overfitting / zero-shot collapse
+ENT_COEF_MIN = 0.008            # Raised from 0.005 to prevent overfitting / zero-shot collapse
 
 # --- Stability Guard ---
 CLIP_FRACTION_THRESHOLD = 0.35  # Early-stop if clip_fraction exceeds this for CLIP_PATIENCE intervals
@@ -130,7 +130,7 @@ def get_ppo_params():
         "batch_size": 1024,
         "n_steps": 4096,
         "n_epochs": 10,             # Increased back to 10 to improve value network fitting (EV)
-        "gamma": 0.995,             # Increased to extend the agent's time horizon
+        "gamma": 0.98,              # Tuned to fit weekly options theta decay half-life (~3 hours)
         "gae_lambda": 0.95,
         "clip_range": 0.20,         # Widened from 0.15 to reduce clip fraction (was 0.35)
         "ent_coef": 0.008,           # Restored to May 1st benchmark value
