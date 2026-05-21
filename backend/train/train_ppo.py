@@ -77,6 +77,19 @@ class TradeDebugCallback(BaseCallback):
         
         return True
 
+class RewardDecompCallback(BaseCallback):
+    """Logs per-step reward decomposition to TensorBoard."""
+    def __init__(self, verbose=0):
+        super().__init__(verbose)
+
+    def _on_step(self) -> bool:
+        for info in self.locals.get("infos", []):
+            for key in ["reward/capital_delta", "reward/penalty_total",
+                        "reward/exit_quality", "reward/patience", "reward/net"]:
+                if key in info:
+                    self.logger.record(key, info[key])
+        return True
+
 class StabilityGuardCallback(BaseCallback):
     """
     Monitors training stability via clip_fraction and explained_variance.
@@ -224,7 +237,7 @@ def train():
     env = VecMonitor(env)
 
     # Apply VecNormalize for stable learning in high-dimensional finance data
-    env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=10.0, clip_reward=5.0)
+    env = VecNormalize(env, norm_obs=True, norm_reward=False, clip_obs=10.0)
 
     # Create Evaluation Environment
     eval_env = DummyVecEnv([
@@ -348,7 +361,8 @@ def train():
                 save_vecnormalize=True,
                 verbose=1
             ),
-            eval_callback
+            eval_callback,
+            RewardDecompCallback()
         ]
     )
     

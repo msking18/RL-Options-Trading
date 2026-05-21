@@ -1,6 +1,6 @@
 import numpy as np
 from typing import Dict, Optional, List
-from backend.train.ppo_config import COMMISSION_TIERS, COMMISSION_TIER_DEFAULT, MIN_OPTION_PRICE, MAX_TRADES_PER_DAY
+from backend.train.ppo_config import COMMISSION_TIERS, COMMISSION_TIER_DEFAULT, MIN_OPTION_PRICE, MAX_TRADES_PER_DAY, EXIT_COOLDOWN_STEPS
 
 class TradingStateManager:
     """
@@ -40,6 +40,8 @@ class TradingStateManager:
         
         # Daily trade tracking
         self.trades_today = np.zeros(self.num_symbols, dtype=np.int32)
+        # Exit cooldown tracking (steps remaining before re-entry allowed)
+        self.exit_cooldown = np.zeros(self.num_symbols, dtype=np.int32)
         
         self.reset()
 
@@ -60,6 +62,7 @@ class TradingStateManager:
         self.pos_sl_price.fill(0.0)
         self.pos_tp_price.fill(0.0)
         self.trades_today.fill(0)
+        self.exit_cooldown.fill(0)
 
     def enter_position(self, symbol: str, pos_type: str, option_price: float, index_price: float, 
                       quantity: int = 1, sl_pct: float = 0.0, tp_pct: float = 0.0, expiry_idx: int = 0,
@@ -187,6 +190,8 @@ class TradingStateManager:
         self.pos_expiry_index[indices] = 0
         self.pos_sl_price[indices] = 0.0
         self.pos_tp_price[indices] = 0.0
+        # Start cooldown timer for exited symbols
+        self.exit_cooldown[indices] = EXIT_COOLDOWN_STEPS
         
         self._update_total_capital()
         return np.sum(realized_pnls)
@@ -241,6 +246,8 @@ class TradingStateManager:
         self.pos_expiry_index[idx] = 0
         self.pos_sl_price[idx] = 0.0
         self.pos_tp_price[idx] = 0.0
+        # Start cooldown timer for exited symbol
+        self.exit_cooldown[idx] = EXIT_COOLDOWN_STEPS
         
         self._update_total_capital()
         return realized_pnl

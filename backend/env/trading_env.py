@@ -17,7 +17,7 @@ from backend.train.ppo_config import (
     DRAWDOWN_PENALTY_MULTIPLIER, MIN_TRADE_VALUE, STATIC_PER_SYMBOL_FEATURES,
     REWARD_SCALE, SIM_AGGRESSION, VOLATILITY_EXPANSION_BONUS,
     REGIME_VOL_LOW, REGIME_VOL_HIGH, MAX_STALE_DURATION, STALE_PENALTY_MULTIPLIER,
-    ZERO_SHOT_SYMBOLS
+    ZERO_SHOT_SYMBOLS, EXIT_COOLDOWN_STEPS
 )
 
 class TradingEnv(gym.Env):
@@ -607,6 +607,7 @@ class TradingEnv(gym.Env):
         # 3. Daily trade limit for symbol not reached
         flat = (pos_types == 0)
         under_limit = self.state_manager.trades_today[active_sym_idxs] < MAX_TRADES_PER_DAY
+        not_on_cooldown = self.state_manager.exit_cooldown[active_sym_idxs] == 0
         
         # Check current volatility for asymmetric risk masking (Suggestion 3)
         curr_vols = self.data_tensor[active_sym_idxs, self.current_step, self.idx_vol]
@@ -616,8 +617,9 @@ class TradingEnv(gym.Env):
         call_prices = self.data_tensor[active_sym_idxs, self.current_step, self.idx_call_e0]
         put_prices = self.data_tensor[active_sym_idxs, self.current_step, self.idx_call_e0 + 1]
         
-        m[active_indices[flat & under_limit & (call_prices >= MIN_OPTION_PRICE)], 1] = True
-        m[active_indices[flat & under_limit & (put_prices >= MIN_OPTION_PRICE)], 2] = True
+        can_enter = flat & under_limit & not_on_cooldown
+        m[active_indices[can_enter & (call_prices >= MIN_OPTION_PRICE)], 1] = True
+        m[active_indices[can_enter & (put_prices >= MIN_OPTION_PRICE)], 2] = True
         
         # If high volatility, force Tight SL only (mask out all other risk options)
         # Risk Categories: 0:No SL, 1:Tight, 2:Conservative, 3:Standard
@@ -806,6 +808,9 @@ class TradingEnv(gym.Env):
         self.current_step += 1
         done = (self.current_step >= self.max_steps)
         
+        # Tick down exit cooldown for all symbols
+        self.state_manager.exit_cooldown = np.maximum(0, self.state_manager.exit_cooldown - 1)
+        
         # 3. Vectorized Position Updates & Intra-Candle SL Simulation
         act_mask = (self.state_manager.pos_type > 0)
         total_penalty = 0.0
@@ -916,10 +921,10 @@ class TradingEnv(gym.Env):
                 
                 # Apply linear penalty, scaled by volatility if above threshold (Suggestion 3)
                 pen = np.where(dd > DRAWDOWN_THRESHOLD_HARD, 
-                               HARD_PENALTY_SCALE * hard_excess * (DRAWDOWN_PENALTY_MULTIPLIER / 100.0),
+                               HARD_PENALTY_SCALE * hard_excess * DRAWDOWN_PENALTY_MULTIPLIER,
                                np.where(dd > DRAWDOWN_THRESHOLD_SOFT, 
-                                        SOFT_PENALTY_SCALE * soft_excess * (DRAWDOWN_PENALTY_MULTIPLIER / 100.0), 
-                                        0.0))
+                                         SOFT_PENALTY_SCALE * soft_excess * DRAWDOWN_PENALTY_MULTIPLIER, 
+                                         0.0))
                 
                 # Dynamic Volatility scaling for drawdown penalties
                 vols = nxt_data[remaining, self.idx_vol]
@@ -970,6 +975,13 @@ class TradingEnv(gym.Env):
             
         self._update_action_masks_vectorized()
         info = {"capital": new_capital}
+        
+        # 5. Reward Decomposition for diagnostics
+        info["reward/capital_delta"] = (new_capital - prev_capital) / self.initial_capital * REWARD_SCALE
+        info["reward/penalty_total"] = total_penalty
+        info["reward/exit_quality"] = getattr(self, '_exit_quality_bonus', 0.0)
+        info["reward/patience"] = float(flat_holds * PATIENCE_BONUS) if 'flat_holds' in locals() else 0.0
+        info["reward/net"] = reward
         
         if done:
             self.close_all_positions()
