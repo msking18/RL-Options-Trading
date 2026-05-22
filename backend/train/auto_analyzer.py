@@ -134,7 +134,7 @@ def analyze_regime_metrics(current_regime, benchmark_regime, previous_regime):
 def analyze_trades(trade_logs):
     """Computes trade behavior statistics."""
     if not trade_logs:
-        return {"total_trades": 0, "avg_hold": 0, "avg_pnl": 0, "profit_factor": 0}
+        return {"total_trades": 0, "avg_hold": 0, "avg_pnl": 0, "profit_factor": 0, "win_rate": 0}
         
     pnls = [t.get('pnl_pct', 0) for t in trade_logs]
     holds = [t.get('hold_duration', 0) for t in trade_logs]

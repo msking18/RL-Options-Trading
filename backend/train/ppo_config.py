@@ -13,7 +13,7 @@ TOTAL_TIMESTEPS = 5_000_000 # Increased budget for stabilization post-regression
 # --- Annealing Configuration ---
 INITIAL_LR = 2e-5               # Reduced from 3e-5 to lower clip fraction (was 0.35)
 FINAL_LR = 1e-5                 # Terminal learning rate
-ENT_COEF_MIN = 0.003            # Anneal target: allows policy to exploit learned patterns
+ENT_COEF_MIN = 0.006            # Gentle anneal target: maintains exploration breadth
 
 # --- Stability Guard ---
 CLIP_FRACTION_THRESHOLD = 0.35  # Early-stop if clip_fraction exceeds this for CLIP_PATIENCE intervals
@@ -27,17 +27,17 @@ LOOKBACK_WINDOW = 30 # Number of previous steps to include in observation
 FIXED_COMMISSION = 20.0 # Per order side (Upstox)
 
 # --- Reward Tuning ---
-PATIENCE_BONUS = 0.0005          # Scaled to be perceptible against REWARD_SCALE=1.0
+PATIENCE_BONUS = 0.0001          # Small tiebreaker; ~20% of typical step reward at REWARD_SCALE=1.0
 REWARD_SCALE = 1.0               # Raw capital-delta; VecNormalize norm_reward disabled
-VOLATILITY_EXPANSION_BONUS = 0.001 # Small bonus for every step held during high vol
+VOLATILITY_EXPANSION_BONUS = 0.0002 # Proportionally scaled for REWARD_SCALE=1.0
 DRAWDOWN_THRESHOLD_SOFT = 0.10   # Widened to reduce noise (10%)
 DRAWDOWN_THRESHOLD_HARD = 0.20   # Severe exit-forcing DD penalty (20%)
 SOFT_PENALTY_SCALE = 0.2         # Gentle slope for soft penalty
 HARD_PENALTY_SCALE = 0.5         # Death Penalty Scale (Requested: 0.5)
 MIN_OPTION_PRICE = 5.0          # Minimum price to allow trade entry
-ENTRY_PENALTY = 0.005           # Scaled to be meaningful against REWARD_SCALE=1.0 (each entry has real cost)
+ENTRY_PENALTY = 0.0002          # Proportional entry friction; ~40% of typical step reward
 MIN_TRADE_VALUE = 250000.0       # Minimum trade value to dilute fixed commissions
-DRAWDOWN_PENALTY_MULTIPLIER = 1.0  # Rescaled to match REWARD_SCALE=1.0 (was 5.0 for REWARD_SCALE=5.0)
+DRAWDOWN_PENALTY_MULTIPLIER = 0.01 # Correctly balanced for REWARD_SCALE=1.0 (prev: 5.0/100.0=0.05 at scale 5.0; 0.05/5=0.01)
 
 # --- Architecture Constants ---
 # (2*5*4) Call Greeks + (2*2) Prices + 1 Pos + 6 Tech + 3 Temp + 2 Risk = 56
@@ -72,7 +72,7 @@ VOL_SCALE_MED_THRESHOLD = 0.25    # Above this vol → 75% size
 
 # --- Minimum Hold Period ---
 MIN_HOLD_STEPS = 5              # Increased to force the model to look for slightly longer signals
-EXIT_COOLDOWN_STEPS = 3         # Must wait N steps after exit before re-entering same slot
+EXIT_COOLDOWN_STEPS = 1         # 1-step cooldown before re-entering same slot (was 3, too restrictive)
 MAX_TRADES_PER_DAY = 5          # Hard limit on trade entries per symbol per day
 SIM_AGGRESSION = 0.5            # Intra-candle SL/TP delta simulation factor
 
