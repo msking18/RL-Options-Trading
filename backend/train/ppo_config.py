@@ -13,7 +13,7 @@ TOTAL_TIMESTEPS = 5_000_000 # Increased budget for stabilization post-regression
 # --- Annealing Configuration ---
 INITIAL_LR = 2e-5               # Reduced from 3e-5 to lower clip fraction (was 0.35)
 FINAL_LR = 1e-5                 # Terminal learning rate
-ENT_COEF_MIN = 0.006            # Gentle anneal target: maintains exploration breadth
+ENT_COEF_MIN = 0.008            # Restored to May 18 working value for sufficient exploration
 
 # --- Stability Guard ---
 CLIP_FRACTION_THRESHOLD = 0.35  # Early-stop if clip_fraction exceeds this for CLIP_PATIENCE intervals
@@ -27,17 +27,17 @@ LOOKBACK_WINDOW = 30 # Number of previous steps to include in observation
 FIXED_COMMISSION = 20.0 # Per order side (Upstox)
 
 # --- Reward Tuning ---
-PATIENCE_BONUS = 0.0001          # Small tiebreaker; ~20% of typical step reward at REWARD_SCALE=1.0
-REWARD_SCALE = 1.0               # Raw capital-delta; VecNormalize norm_reward disabled
-VOLATILITY_EXPANSION_BONUS = 0.0002 # Proportionally scaled for REWARD_SCALE=1.0
+PATIENCE_BONUS = 0.0001          # Small tiebreaker; ~4% of typical step reward at REWARD_SCALE=5.0
+REWARD_SCALE = 5.0               # Restored: amplifies capital-delta for learnable gradient signal
+VOLATILITY_EXPANSION_BONUS = 0.001  # Restored to May 18 value (proportional to REWARD_SCALE=5.0)
 DRAWDOWN_THRESHOLD_SOFT = 0.10   # Widened to reduce noise (10%)
 DRAWDOWN_THRESHOLD_HARD = 0.20   # Severe exit-forcing DD penalty (20%)
 SOFT_PENALTY_SCALE = 0.2         # Gentle slope for soft penalty
 HARD_PENALTY_SCALE = 0.5         # Death Penalty Scale (Requested: 0.5)
 MIN_OPTION_PRICE = 5.0          # Minimum price to allow trade entry
-ENTRY_PENALTY = 0.0002          # Proportional entry friction; ~40% of typical step reward
+ENTRY_PENALTY = 0.0001          # Restored to May 18 value (proportional to REWARD_SCALE=5.0)
 MIN_TRADE_VALUE = 250000.0       # Minimum trade value to dilute fixed commissions
-DRAWDOWN_PENALTY_MULTIPLIER = 0.01 # Correctly balanced for REWARD_SCALE=1.0 (prev: 5.0/100.0=0.05 at scale 5.0; 0.05/5=0.01)
+DRAWDOWN_PENALTY_MULTIPLIER = 5.0  # Restored to May 18 value; /100.0 divisor re-added in trading_env.py
 
 # --- Architecture Constants ---
 # (2*5*4) Call Greeks + (2*2) Prices + 1 Pos + 6 Tech + 3 Temp + 2 Risk = 56
@@ -52,8 +52,8 @@ def get_obs_size(lookback, slots):
 # Graduated commission tiers: {max_hold_duration: multiplier}
 # Scalps (1 step) pay 10× base to force longer holding
 COMMISSION_TIERS = [
-    (1, 5.0),    # 1 step   → 5.0× commission (Relaxed to allow faster loss cutting)
-    (2, 3.0),    # 2 steps  → 3.0× commission
+    (1, 10.0),   # 1 step   → 10.0× commission (punish scalping to force longer signals)
+    (2, 5.0),    # 2 steps  → 5.0× commission
     (4, 2.0),    # 3-4 steps → 2.0× commission
     (9, 1.0),    # 5-9 steps → 1.0× commission
 ]
@@ -72,7 +72,7 @@ VOL_SCALE_MED_THRESHOLD = 0.25    # Above this vol → 75% size
 
 # --- Minimum Hold Period ---
 MIN_HOLD_STEPS = 5              # Increased to force the model to look for slightly longer signals
-EXIT_COOLDOWN_STEPS = 1         # 1-step cooldown before re-entering same slot (was 3, too restrictive)
+EXIT_COOLDOWN_STEPS = 2         # 2-step cooldown: compromise between churn prevention and flexibility
 MAX_TRADES_PER_DAY = 5          # Hard limit on trade entries per symbol per day
 SIM_AGGRESSION = 0.5            # Intra-candle SL/TP delta simulation factor
 

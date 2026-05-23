@@ -69,11 +69,16 @@ class TradeDebugCallback(BaseCallback):
                     sl_rate = sl_hits / total_trades
                     tp_rate = tp_hits / total_trades
                     avg_dur = sum(durations) / total_trades
+                    wins = sum(1 for log in logs if log.get('pnl', 0) > 0)
+                    win_rate = wins / total_trades
+                    avg_pnl = sum(log.get('pnl_pct', 0) for log in logs) / total_trades
                     
                     self.logger.record("debug/sl_hit_rate", sl_rate)
                     self.logger.record("debug/tp_hit_rate", tp_rate)
                     self.logger.record("debug/avg_hold_duration", avg_dur)
                     self.logger.record("debug/total_trades_per_episode", total_trades)
+                    self.logger.record("debug/win_rate", win_rate)
+                    self.logger.record("debug/avg_pnl_pct", avg_pnl)
         
         return True
 

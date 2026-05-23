@@ -921,9 +921,9 @@ class TradingEnv(gym.Env):
                 
                 # Apply linear penalty, scaled by volatility if above threshold (Suggestion 3)
                 pen = np.where(dd > DRAWDOWN_THRESHOLD_HARD, 
-                               HARD_PENALTY_SCALE * hard_excess * DRAWDOWN_PENALTY_MULTIPLIER,
+                               HARD_PENALTY_SCALE * hard_excess * DRAWDOWN_PENALTY_MULTIPLIER / 100.0,
                                np.where(dd > DRAWDOWN_THRESHOLD_SOFT, 
-                                         SOFT_PENALTY_SCALE * soft_excess * DRAWDOWN_PENALTY_MULTIPLIER, 
+                                         SOFT_PENALTY_SCALE * soft_excess * DRAWDOWN_PENALTY_MULTIPLIER / 100.0, 
                                          0.0))
                 
                 # Dynamic Volatility scaling for drawdown penalties
@@ -971,7 +971,7 @@ class TradingEnv(gym.Env):
         # Death Penalty — tightened to 50% loss for faster learning signal
         if new_capital < (self.initial_capital * 0.5):
             done = True
-            reward -= 0.2
+            reward -= 1.0 * REWARD_SCALE  # Scale-aware: -5.0 at REWARD_SCALE=5.0
             
         self._update_action_masks_vectorized()
         info = {"capital": new_capital}
