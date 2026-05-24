@@ -25,10 +25,19 @@ MAX_SYMBOLS = 6
 TOTAL_SLOTS = 6
 LOOKBACK_WINDOW = 30 # Number of previous steps to include in observation
 FIXED_COMMISSION = 20.0 # Per order side (Upstox)
+BROKERAGE_PER_SIDE = 20.0 # Upstox flat brokerage fee per order side
+
+# --- Realistic Indian Options Taxes & Frictions ---
+STT_SELL_RATE = 0.000625              # 0.0625% on option premium (Sell side only)
+NSE_TRANS_CHARGES_RATE = 0.00053      # 0.053% of option premium value (NSE)
+GST_RATE = 0.18                       # 18% on (Brokerage + Exchange Charges)
+SEBI_FEES_RATE = 0.000001             # 0.0001% of premium value (₹10/crore)
+STAMP_DUTY_BUY_RATE = 0.00003         # 0.003% of premium value (Buy side only)
 
 # --- Reward Tuning ---
 PATIENCE_BONUS = 0.0001          # Small tiebreaker; ~4% of typical step reward at REWARD_SCALE=5.0
 REWARD_SCALE = 5.0               # Restored: amplifies capital-delta for learnable gradient signal
+REWARD_LOG_SCALE_MULTIPLIER = 10.0   # Scale multiplier inside log1p to squash high-variance outliers
 VOLATILITY_EXPANSION_BONUS = 0.001  # Restored to May 18 value (proportional to REWARD_SCALE=5.0)
 DRAWDOWN_THRESHOLD_SOFT = 0.10   # Widened to reduce noise (10%)
 DRAWDOWN_THRESHOLD_HARD = 0.20   # Severe exit-forcing DD penalty (20%)
@@ -40,8 +49,8 @@ MIN_TRADE_VALUE = 250000.0       # Minimum trade value to dilute fixed commissio
 DRAWDOWN_PENALTY_MULTIPLIER = 5.0  # Restored to May 18 value; /100.0 divisor re-added in trading_env.py
 
 # --- Architecture Constants ---
-# (2*5*4) Call Greeks + (2*2) Prices + 1 Pos + 6 Tech + 3 Temp + 2 Risk = 56
-STATIC_PER_SYMBOL_FEATURES = 74  # Includes Symmetric Put Greeks (Delta/Theta)
+# (2*5*4) Call Greeks + (2*2) Prices + 1 Pos + 6 Tech + 3 Temp + 2 Risk + 2 Custom = 76
+STATIC_PER_SYMBOL_FEATURES = 76  # Includes Symmetric Put Greeks + Volatility Skew + Max Pain Distance
 EXTERNAL_FEATURES_COUNT = 19    # 18 macro/sentiment/event features + 1 for Regime Signal
 
 def get_obs_size(lookback, slots):

@@ -1,6 +1,11 @@
 import numpy as np
 from typing import Dict, Optional, List
-from backend.train.ppo_config import COMMISSION_TIERS, COMMISSION_TIER_DEFAULT, MIN_OPTION_PRICE, MAX_TRADES_PER_DAY, EXIT_COOLDOWN_STEPS
+from backend.train.ppo_config import (
+    COMMISSION_TIERS, COMMISSION_TIER_DEFAULT, MIN_OPTION_PRICE, 
+    MAX_TRADES_PER_DAY, EXIT_COOLDOWN_STEPS, BROKERAGE_PER_SIDE,
+    STT_SELL_RATE, NSE_TRANS_CHARGES_RATE, GST_RATE, SEBI_FEES_RATE,
+    STAMP_DUTY_BUY_RATE
+)
 
 class TradingStateManager:
     """
@@ -64,9 +69,36 @@ class TradingStateManager:
         self.trades_today.fill(0)
         self.exit_cooldown.fill(0)
 
+    def calculate_transaction_charges(self, option_price: float, quantity: int, is_buy: bool) -> float:
+        """
+        Calculates exact realistic Indian transaction charges/taxes for Upstox/NSE index options.
+        """
+        premium_value = option_price * quantity
+        
+        # 1. Flat Brokerage
+        brokerage = BROKERAGE_PER_SIDE
+        
+        # 2. STT (Securities Transaction Tax): 0.0625% on option premium (Sell side only)
+        stt = STT_SELL_RATE * premium_value if not is_buy else 0.0
+        
+        # 3. Exchange Transaction Charges (NSE): 0.053% of premium value
+        exchange_charges = NSE_TRANS_CHARGES_RATE * premium_value
+        
+        # 4. SEBI Turnover Fees: 0.0001% of premium value
+        sebi_fees = SEBI_FEES_RATE * premium_value
+        
+        # 5. Stamp Duty: 0.003% of premium value on buy side only
+        stamp_duty = STAMP_DUTY_BUY_RATE * premium_value if is_buy else 0.0
+        
+        # 6. GST: 18% on (Brokerage + Exchange Charges)
+        gst = GST_RATE * (brokerage + exchange_charges)
+        
+        total_charges = brokerage + stt + exchange_charges + sebi_fees + stamp_duty + gst
+        return total_charges
+
     def enter_position(self, symbol: str, pos_type: str, option_price: float, index_price: float, 
-                      quantity: int = 1, sl_pct: float = 0.0, tp_pct: float = 0.0, expiry_idx: int = 0,
-                      timestamp: int = 0):
+                       quantity: int = 1, sl_pct: float = 0.0, tp_pct: float = 0.0, expiry_idx: int = 0,
+                       timestamp: int = 0):
         idx = self.symbol_to_idx.get(symbol)
         if idx is None or self.pos_type[idx] != self.TYPE_NONE or option_price < MIN_OPTION_PRICE:
             return False
@@ -77,7 +109,9 @@ class TradingStateManager:
             return False
             
         execution_price = option_price * (1 + self.slippage_pct)
-        total_cost = (execution_price * quantity) + self.fixed_commission
+        # Entry charges (is_buy = True)
+        entry_charges = self.calculate_transaction_charges(execution_price, quantity, is_buy=True)
+        total_cost = (execution_price * quantity) + entry_charges
         
         if self.cash_balance < total_cost:
             return False
@@ -106,22 +140,6 @@ class TradingStateManager:
         self.trades_today[idx] += 1
         return True
 
-    def _get_exit_commission(self, hold_duration: int) -> float:
-        """Graduated commission: penalize short holds (scalps), reward patience."""
-        for max_dur, multiplier in COMMISSION_TIERS:
-            if hold_duration <= max_dur:
-                return self.fixed_commission * multiplier
-        return self.fixed_commission * COMMISSION_TIER_DEFAULT
-
-    def get_bulk_exit_commissions(self, hold_durations: np.ndarray) -> np.ndarray:
-        """Vectorized version of graduated commission logic."""
-        commissions = np.full_like(hold_durations, self.fixed_commission * COMMISSION_TIER_DEFAULT, dtype=np.float32)
-        # Apply tiers in reverse to ensure the lowest valid multiplier is applied correctly
-        # or just iterate through tiers (there are only 3-4 tiers usually)
-        for max_dur, multiplier in reversed(COMMISSION_TIERS):
-            commissions[hold_durations <= max_dur] = self.fixed_commission * multiplier
-        return commissions
-
     def bulk_exit(self, indices: np.ndarray, current_option_prices: np.ndarray, 
                   timestamp: int = 0, extra_info: dict = None):
         """
@@ -135,11 +153,33 @@ class TradingStateManager:
         execution_prices = current_option_prices * (1 - self.slippage_pct)
         hold_durs = self.pos_hold_dur[indices]
         
-        exit_commissions = self.get_bulk_exit_commissions(hold_durs)
-        entry_commissions = np.full_like(indices, self.fixed_commission, dtype=np.float32)
+        # Calculate dynamic exit charges including options taxes
+        exit_charges = np.zeros(len(indices), dtype=np.float32)
+        entry_charges = np.zeros(len(indices), dtype=np.float32)
         
-        exit_proceeds = (execution_prices * quantities) - exit_commissions
-        entry_costs = (self.pos_entry_price[indices] * quantities) + entry_commissions
+        for i, idx in enumerate(indices):
+            # Exit charges (is_buy = False) with graduated commission multiplier
+            duration_mult = 1.0
+            for max_dur, multiplier in COMMISSION_TIERS:
+                if hold_durs[i] <= max_dur:
+                    duration_mult = multiplier
+                    break
+            else:
+                duration_mult = COMMISSION_TIER_DEFAULT
+                
+            base_brokerage = BROKERAGE_PER_SIDE * duration_mult
+            premium_value = execution_prices[i] * quantities[i]
+            stt = STT_SELL_RATE * premium_value
+            exchange_charges = NSE_TRANS_CHARGES_RATE * premium_value
+            sebi_fees = SEBI_FEES_RATE * premium_value
+            gst = GST_RATE * (base_brokerage + exchange_charges)
+            exit_charges[i] = base_brokerage + stt + exchange_charges + sebi_fees + gst
+            
+            # Entry charges (is_buy = True) computed on entry price
+            entry_charges[i] = self.calculate_transaction_charges(self.pos_entry_price[idx], quantities[i], is_buy=True)
+        
+        exit_proceeds = (execution_prices * quantities) - exit_charges
+        entry_costs = (self.pos_entry_price[indices] * quantities) + entry_charges
         realized_pnls = exit_proceeds - entry_costs
         
         self.cash_balance += np.sum(exit_proceeds)
@@ -169,7 +209,7 @@ class TradingStateManager:
                 'pnl': float(realized_pnls[i]),
                 'pnl_pct': float(realized_pnls[i] / entry_val) if entry_val > 0 else 0.0,
                 'is_win': bool(realized_pnls[i] > 0),
-                'commission_exit': float(exit_commissions[i])
+                'commission_exit': float(exit_charges[i])
             }
             if extra_info:
                 # Distribute per-trade info if provided as a list/array of same length as indices
@@ -204,13 +244,29 @@ class TradingStateManager:
         quantity = self.pos_qty[idx]
         execution_price = current_option_price * (1 - self.slippage_pct)
         
-        # Graduated commission: scalps pay more, patient holds pay less
-        exit_commission = self._get_exit_commission(int(self.pos_hold_dur[idx]))
-        entry_commission = self.fixed_commission  # Entry always pays base rate
+        # Calculate exit charges with graduated commission
+        duration_mult = 1.0
+        for max_dur, multiplier in COMMISSION_TIERS:
+            if self.pos_hold_dur[idx] <= max_dur:
+                duration_mult = multiplier
+                break
+        else:
+            duration_mult = COMMISSION_TIER_DEFAULT
+            
+        base_brokerage = BROKERAGE_PER_SIDE * duration_mult
+        premium_value = execution_price * quantity
+        stt = STT_SELL_RATE * premium_value
+        exchange_charges = NSE_TRANS_CHARGES_RATE * premium_value
+        sebi_fees = SEBI_FEES_RATE * premium_value
+        gst = GST_RATE * (base_brokerage + exchange_charges)
+        exit_charge = base_brokerage + stt + exchange_charges + sebi_fees + gst
         
-        realized_pnl = (execution_price * quantity - exit_commission) - (self.pos_entry_price[idx] * quantity + entry_commission)
+        # Calculate entry charges
+        entry_charge = self.calculate_transaction_charges(self.pos_entry_price[idx], quantity, is_buy=True)
         
-        self.cash_balance += (execution_price * quantity) - exit_commission
+        realized_pnl = (execution_price * quantity - exit_charge) - (self.pos_entry_price[idx] * quantity + entry_charge)
+        
+        self.cash_balance += (execution_price * quantity) - exit_charge
         self.total_pnl += realized_pnl
         
         # Log trade (maintained for post-run analysis)
@@ -227,7 +283,7 @@ class TradingStateManager:
             'pnl': float(realized_pnl),
             'pnl_pct': float(realized_pnl / entry_val) if entry_val > 0 else 0.0,
             'is_win': bool(realized_pnl > 0),
-            'commission_exit': float(exit_commission)
+            'commission_exit': float(exit_charge)
         }
         
         # Merge extra info (Context like sentiment/macro)

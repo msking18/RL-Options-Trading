@@ -33,17 +33,17 @@ def calculate_performance_metrics(equity_curve: List[float], risk_free_rate: flo
     # Assume 5-min candles, 78 per day, 252 days per year
     freq = 252 * 78 
     
-    # Corrected Annualized Return (Log returns for better stability in scaling)
-    ann_return = ((1 + total_return) ** (freq / len(equity))) - 1
+    # Corrected Annualized Return (Linear annualization for stability across different evaluation horizons)
+    ann_return = total_return * (freq / len(equity))
     ann_vol = np.std(returns) * np.sqrt(freq)
     
-    # Sharpe Ratio
-    metrics["sharpe_ratio"] = (ann_return - risk_free_rate) / ann_vol if ann_vol > 0 else 0
+    # Sharpe Ratio (with epsilon bound to prevent divide-by-zero or extreme scaling spikes)
+    metrics["sharpe_ratio"] = (ann_return - risk_free_rate) / (ann_vol + 1e-4) if ann_vol > 0 else 0.0
     
-    # Sortino Ratio
+    # Sortino Ratio (with epsilon bound)
     negative_returns = returns[returns < 0]
     downside_vol = np.std(negative_returns) * np.sqrt(freq) if len(negative_returns) > 0 else 0
-    metrics["sortino_ratio"] = (ann_return - risk_free_rate) / downside_vol if downside_vol > 0 else 0
+    metrics["sortino_ratio"] = (ann_return - risk_free_rate) / (downside_vol + 1e-4) if downside_vol > 0 else 0.0
     
     # Max Drawdown
     cumulative_max = np.maximum.accumulate(equity)

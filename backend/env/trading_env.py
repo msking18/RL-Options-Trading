@@ -17,7 +17,7 @@ from backend.train.ppo_config import (
     DRAWDOWN_PENALTY_MULTIPLIER, MIN_TRADE_VALUE, STATIC_PER_SYMBOL_FEATURES,
     REWARD_SCALE, SIM_AGGRESSION, VOLATILITY_EXPANSION_BONUS,
     REGIME_VOL_LOW, REGIME_VOL_HIGH, MAX_STALE_DURATION, STALE_PENALTY_MULTIPLIER,
-    ZERO_SHOT_SYMBOLS, EXIT_COOLDOWN_STEPS
+    ZERO_SHOT_SYMBOLS, EXIT_COOLDOWN_STEPS, REWARD_LOG_SCALE_MULTIPLIER
 )
 
 class TradingEnv(gym.Env):
@@ -123,8 +123,9 @@ class TradingEnv(gym.Env):
                     ])
             tech_cols = ['RSI', 'ATR', 'Index_Vol', 'EMA_50', 'EMA_200']
             price_cols = ['e0_call_price', 'e0_put_price', 'e1_call_price', 'e1_put_price']
+            custom_cols = ['volatility_skew', 'max_pain_distance']
             
-            self.tensor_cols = ohlcv_cols + greek_cols + tech_cols + price_cols + self.external_features_cols
+            self.tensor_cols = ohlcv_cols + greek_cols + tech_cols + price_cols + custom_cols + self.external_features_cols
             self.col_to_idx = {col: i for i, col in enumerate(self.tensor_cols)}
             
             num_symbols = len(self.symbol_list)
@@ -171,6 +172,9 @@ class TradingEnv(gym.Env):
         self.idx_put_e0 = self.col_to_idx['e0_put_price']
         self.idx_call_e1 = self.col_to_idx['e1_call_price']
         self.idx_put_e1 = self.col_to_idx['e1_put_price']
+        
+        self.idx_skew = self.col_to_idx['volatility_skew']
+        self.idx_max_pain = self.col_to_idx['max_pain_distance']
 
         # Cache Greek indices dynamically to avoid hardcoded offsets
         self.idx_greeks = {}
@@ -437,6 +441,14 @@ class TradingEnv(gym.Env):
             df[f'e{e_idx}_call_price'] = df[f'e{e_idx}_call_price'].clip(lower=0.01)
             df[f'e{e_idx}_put_price'] = df[f'e{e_idx}_put_price'].clip(lower=0.01)
             
+        # 3. Custom Features (Volatility Skew and Max Pain Distance)
+        # Skew proxy: rises during market downturns and when volatility is high
+        ema_50 = df['EMA_50'].values if 'EMA_50' in df.columns else spot
+        df['volatility_skew'] = 0.15 + 0.1 * (ema_50 - spot) / (spot * vol + 1e-6)
+        
+        # Max Pain Distance proxy: distance from spot to the nearest strike
+        df['max_pain_distance'] = (spot - atm_strike) / spot
+            
         return df
 
     def _get_obs(self):
@@ -545,6 +557,12 @@ class TradingEnv(gym.Env):
             lot_sizes = np.array([self.lot_size_map.get(self.symbol_list[idx], 50) for idx in active_sym_idxs])
             sym_features[:, f_idx] = lot_sizes / 75.0; f_idx += 1
             sym_features[:, f_idx] = (spots * lot_sizes) / self.state_manager.total_capital; f_idx += 1
+            
+            # 9. Custom Options Features (2) - Volatility Skew and Max Pain Distance
+            skews = current_data[:, self.idx_skew]
+            max_pain_dists = current_data[:, self.idx_max_pain]
+            sym_features[:, f_idx] = skews; f_idx += 1
+            sym_features[:, f_idx] = max_pain_dists; f_idx += 1
             
             # Write to buffer by slot
             for j, slot_i in enumerate(active_slots):
@@ -771,11 +789,38 @@ class TradingEnv(gym.Env):
                 sym = self.slot_to_symbol[active_indices[i]]
                 e_idx = 0 # Forced restriction to Current Week
                 risk_idx = slot_actions[i, 1] 
-                sl_pct, tp_pct = SL_TP_CATEGORIES[risk_idx]
                 
                 # Determine option column (Current Week)
                 col = self.idx_call_e0 # e_idx 0
                 if buy_puts[i]: col += 1
+                
+                # Dynamic ATR-scaled Stop-Loss and Take-Profit mapping
+                if risk_idx == 0:
+                    sl_pct, tp_pct = 0.0, 0.0
+                else:
+                    # Fetch ATR and Close price for current symbol
+                    spot = curr_data[i, self.idx_close]
+                    atr = curr_data[i, self.idx_atr]
+                    
+                    # Call/Put delta sensitivity
+                    delta_col = self.idx_greeks.get((0, 0, 'delta'), self.idx_timestamp + 1)
+                    d_val = curr_data[i, delta_col]
+                    sens = d_val if buy_calls[i] else (1.0 - d_val)
+                    
+                    # Approximate option price change for 1 ATR underlying movement
+                    option_price = curr_data[i, col]
+                    option_atr_move = max(1e-4, atr * sens)
+                    atr_option_pct = option_atr_move / max(option_price, 1e-6)
+                    
+                    if risk_idx == 1: # Tight
+                        sl_pct = float(np.clip(1.5 * atr_option_pct, 0.10, 0.40))
+                        tp_pct = float(np.clip(3.0 * atr_option_pct, 0.20, 0.80))
+                    elif risk_idx == 2: # Conservative
+                        sl_pct = float(np.clip(3.0 * atr_option_pct, 0.25, 0.60))
+                        tp_pct = float(np.clip(6.0 * atr_option_pct, 0.50, 1.50))
+                    else: # Standard (3)
+                        sl_pct = float(np.clip(5.0 * atr_option_pct, 0.40, 0.80))
+                        tp_pct = float(np.clip(10.0 * atr_option_pct, 0.80, 3.00))
 
                 # Value-based position sizing to ensure commissions are diluted
                 option_price = curr_data[i, col]
@@ -949,8 +994,10 @@ class TradingEnv(gym.Env):
         new_capital = self.state_manager.total_capital
         
         # 4. Reward Logic
-        reward = (new_capital - prev_capital) / self.initial_capital * REWARD_SCALE
-        reward -= total_penalty
+        raw_delta = (new_capital - prev_capital) / self.initial_capital
+        # Symmetric log-scaling to damp down explosive options swings while preserving sign and direction
+        scaled_delta = np.sign(raw_delta) * np.log1p(abs(raw_delta) * REWARD_SCALE * REWARD_LOG_SCALE_MULTIPLIER)
+        reward = scaled_delta - total_penalty
         
         # Apply trade quality bonus accumulated from profitable exits
         if hasattr(self, '_exit_quality_bonus') and self._exit_quality_bonus > 0:
@@ -977,11 +1024,11 @@ class TradingEnv(gym.Env):
         info = {"capital": new_capital}
         
         # 5. Reward Decomposition for diagnostics
-        info["reward/capital_delta"] = (new_capital - prev_capital) / self.initial_capital * REWARD_SCALE
-        info["reward/penalty_total"] = total_penalty
-        info["reward/exit_quality"] = getattr(self, '_exit_quality_bonus', 0.0)
+        info["reward/capital_delta"] = float(scaled_delta)
+        info["reward/penalty_total"] = float(total_penalty)
+        info["reward/exit_quality"] = float(getattr(self, '_exit_quality_bonus', 0.0))
         info["reward/patience"] = float(flat_holds * PATIENCE_BONUS) if 'flat_holds' in locals() else 0.0
-        info["reward/net"] = reward
+        info["reward/net"] = float(reward)
         
         if done:
             self.close_all_positions()
