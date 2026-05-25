@@ -711,6 +711,10 @@ class TradingEnv(gym.Env):
         prev_capital = self.state_manager.total_capital
         self.state_manager.current_step = self.current_step
         
+        # Track portfolio high-water mark and current drawdown
+        self.high_water_mark = max(self.high_water_mark, prev_capital)
+        port_drawdown = (self.high_water_mark - prev_capital) / self.high_water_mark if self.high_water_mark > 0 else 0.0
+        
         # 0. Daily Reset Check (Timestamp-based date change detection)
         if self.current_step > self.lookback_window:
             prev_ts = int(self.data_tensor[0, self.current_step - 1, self.idx_timestamp])
@@ -789,6 +793,7 @@ class TradingEnv(gym.Env):
                 sym = self.slot_to_symbol[active_indices[i]]
                 e_idx = 0 # Forced restriction to Current Week
                 risk_idx = slot_actions[i, 1] 
+                sym_vol = curr_data[i, self.idx_vol]
                 
                 # Determine option column (Current Week)
                 col = self.idx_call_e0 # e_idx 0
@@ -798,7 +803,7 @@ class TradingEnv(gym.Env):
                 if risk_idx == 0:
                     sl_pct, tp_pct = 0.0, 0.0
                 else:
-                    # Fetch ATR and Close price for current symbol
+                    # Fetch ATR, Vol, and Close price for current symbol
                     spot = curr_data[i, self.idx_close]
                     atr = curr_data[i, self.idx_atr]
                     
@@ -812,15 +817,18 @@ class TradingEnv(gym.Env):
                     option_atr_move = max(1e-4, atr * sens)
                     atr_option_pct = option_atr_move / max(option_price, 1e-6)
                     
+                    # Tighten stop-losses in high volatility or zero-shot regimes
+                    is_volatile_or_zero_shot = (sym_vol > VOL_SCALE_MED_THRESHOLD) or (sym in ZERO_SHOT_SYMBOLS)
+                    
                     if risk_idx == 1: # Tight
-                        sl_pct = float(np.clip(1.5 * atr_option_pct, 0.10, 0.40))
-                        tp_pct = float(np.clip(3.0 * atr_option_pct, 0.20, 0.80))
+                        sl_pct = float(np.clip(1.5 * atr_option_pct, 0.10, 0.30 if is_volatile_or_zero_shot else 0.40))
+                        tp_pct = float(np.clip(3.0 * atr_option_pct, 0.20, 0.60 if is_volatile_or_zero_shot else 0.80))
                     elif risk_idx == 2: # Conservative
-                        sl_pct = float(np.clip(3.0 * atr_option_pct, 0.25, 0.60))
-                        tp_pct = float(np.clip(6.0 * atr_option_pct, 0.50, 1.50))
+                        sl_pct = float(np.clip(3.0 * atr_option_pct, 0.20, 0.45 if is_volatile_or_zero_shot else 0.60))
+                        tp_pct = float(np.clip(6.0 * atr_option_pct, 0.40, 1.10 if is_volatile_or_zero_shot else 1.50))
                     else: # Standard (3)
-                        sl_pct = float(np.clip(5.0 * atr_option_pct, 0.40, 0.80))
-                        tp_pct = float(np.clip(10.0 * atr_option_pct, 0.80, 3.00))
+                        sl_pct = float(np.clip(5.0 * atr_option_pct, 0.30, 0.60 if is_volatile_or_zero_shot else 0.80))
+                        tp_pct = float(np.clip(10.0 * atr_option_pct, 0.60, 2.20 if is_volatile_or_zero_shot else 3.00))
 
                 # Value-based position sizing to ensure commissions are diluted
                 option_price = curr_data[i, col]
@@ -831,11 +839,21 @@ class TradingEnv(gym.Env):
                 # Round to nearest lot size
                 lot_count = max(1, round(target_units / base_lot_size))
                 
-                sym_vol = curr_data[i, self.idx_vol]
-                vol_scale = 0.5 if sym_vol > VOL_SCALE_HIGH_THRESHOLD else (0.75 if sym_vol > VOL_SCALE_MED_THRESHOLD else 1.0)
+                # Dynamic Volatility scaling (Three-tier volatility scaling)
+                if sym_vol > VOL_SCALE_HIGH_THRESHOLD:
+                    vol_scale = 0.35   # Scale down to 35% size in high volatility (was 50%)
+                elif sym_vol > VOL_SCALE_MED_THRESHOLD:
+                    vol_scale = 0.65   # Scale down to 65% size in medium volatility (was 75%)
+                else:
+                    vol_scale = 1.0
                 
-                # Apply vol scale to the calculated lot count
-                final_lot_count = max(1, int(lot_count * vol_scale))
+                # Dynamic Drawdown scaling to protect capital during portfolio drawdowns
+                dd_scale = 1.0
+                if port_drawdown > 0.05:
+                    dd_scale = max(0.1, 1.0 - 0.8 * (port_drawdown - 0.05) / 0.10)
+                
+                # Apply scaling factors to the calculated lot count
+                final_lot_count = max(1, int(lot_count * vol_scale * dd_scale))
                 lot_size = final_lot_count * base_lot_size
                 
                 success = self.state_manager.enter_position(sym, 'LONG_CALL' if buy_calls[i] else 'LONG_PUT',

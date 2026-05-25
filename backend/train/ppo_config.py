@@ -39,9 +39,9 @@ PATIENCE_BONUS = 0.0001          # Small tiebreaker; ~4% of typical step reward 
 REWARD_SCALE = 5.0               # Restored: amplifies capital-delta for learnable gradient signal
 REWARD_LOG_SCALE_MULTIPLIER = 10.0   # Scale multiplier inside log1p to squash high-variance outliers
 VOLATILITY_EXPANSION_BONUS = 0.001  # Restored to May 18 value (proportional to REWARD_SCALE=5.0)
-DRAWDOWN_THRESHOLD_SOFT = 0.10   # Widened to reduce noise (10%)
-DRAWDOWN_THRESHOLD_HARD = 0.20   # Severe exit-forcing DD penalty (20%)
-SOFT_PENALTY_SCALE = 0.2         # Gentle slope for soft penalty
+DRAWDOWN_THRESHOLD_SOFT = 0.07   # Tightened from 0.10 to trigger earlier penalty signal
+DRAWDOWN_THRESHOLD_HARD = 0.15   # Tightened from 0.20 to enforce stricter drawdown exit limits
+SOFT_PENALTY_SCALE = 0.3         # Steeper penalty slope to discourage drawdown accumulation (was 0.2)
 HARD_PENALTY_SCALE = 0.5         # Death Penalty Scale (Requested: 0.5)
 MIN_OPTION_PRICE = 5.0          # Minimum price to allow trade entry
 ENTRY_PENALTY = 0.0001          # Restored to May 18 value (proportional to REWARD_SCALE=5.0)
@@ -76,8 +76,8 @@ REGIME_VOL_HIGH = 0.25
 EARLY_STOPPING_PATIENCE = 5
 
 # --- Volatility Position Sizing ---
-VOL_SCALE_HIGH_THRESHOLD = 0.40   # Above this vol → 50% size
-VOL_SCALE_MED_THRESHOLD = 0.25    # Above this vol → 75% size
+VOL_SCALE_HIGH_THRESHOLD = 0.35   # Lowered from 0.40 to trigger high-vol scaling earlier
+VOL_SCALE_MED_THRESHOLD = 0.20    # Lowered from 0.25 to trigger med-vol scaling earlier
 
 # --- Minimum Hold Period ---
 MIN_HOLD_STEPS = 5              # Increased to force the model to look for slightly longer signals
