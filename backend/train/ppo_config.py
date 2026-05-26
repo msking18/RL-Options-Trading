@@ -39,9 +39,9 @@ PATIENCE_BONUS = 0.0001          # Small tiebreaker; ~4% of typical step reward 
 REWARD_SCALE = 5.0               # Restored: amplifies capital-delta for learnable gradient signal
 REWARD_LOG_SCALE_MULTIPLIER = 10.0   # Scale multiplier inside log1p to squash high-variance outliers
 VOLATILITY_EXPANSION_BONUS = 0.001  # Restored to May 18 value (proportional to REWARD_SCALE=5.0)
-DRAWDOWN_THRESHOLD_SOFT = 0.07   # Tightened from 0.10 to trigger earlier penalty signal
-DRAWDOWN_THRESHOLD_HARD = 0.15   # Tightened from 0.20 to enforce stricter drawdown exit limits
-SOFT_PENALTY_SCALE = 0.3         # Steeper penalty slope to discourage drawdown accumulation (was 0.2)
+DRAWDOWN_THRESHOLD_SOFT = 0.10   # Relaxed from 0.07: 7% was too aggressive for 6-month OoS windows
+DRAWDOWN_THRESHOLD_HARD = 0.20   # Relaxed from 0.15: 15% triggered on normal intraday fluctuations in long evals
+SOFT_PENALTY_SCALE = 0.25        # Compromise between 0.2 (too weak) and 0.3 (crushed Standard OoS)
 HARD_PENALTY_SCALE = 0.5         # Death Penalty Scale (Requested: 0.5)
 MIN_OPTION_PRICE = 5.0          # Minimum price to allow trade entry
 ENTRY_PENALTY = 0.0001          # Restored to May 18 value (proportional to REWARD_SCALE=5.0)
@@ -80,8 +80,8 @@ VOL_SCALE_HIGH_THRESHOLD = 0.35   # Lowered from 0.40 to trigger high-vol scalin
 VOL_SCALE_MED_THRESHOLD = 0.20    # Lowered from 0.25 to trigger med-vol scaling earlier
 
 # --- Minimum Hold Period ---
-MIN_HOLD_STEPS = 5              # Increased to force the model to look for slightly longer signals
-EXIT_COOLDOWN_STEPS = 2         # 2-step cooldown: compromise between churn prevention and flexibility
+MIN_HOLD_STEPS = 7              # Increased from 5: reduce churn (2580 trades at 3.2 avg hold was too noisy)
+EXIT_COOLDOWN_STEPS = 3         # Widened from 2: forces agent to be more selective about re-entry
 MAX_TRADES_PER_DAY = 5          # Hard limit on trade entries per symbol per day
 SIM_AGGRESSION = 0.5            # Intra-candle SL/TP delta simulation factor
 

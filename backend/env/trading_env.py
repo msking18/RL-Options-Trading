@@ -848,9 +848,10 @@ class TradingEnv(gym.Env):
                     vol_scale = 1.0
                 
                 # Dynamic Drawdown scaling to protect capital during portfolio drawdowns
+                # Relaxed: wider trigger (8% vs 5%), slower decay, higher floor (25% vs 10%)
                 dd_scale = 1.0
-                if port_drawdown > 0.05:
-                    dd_scale = max(0.1, 1.0 - 0.8 * (port_drawdown - 0.05) / 0.10)
+                if port_drawdown > 0.08:
+                    dd_scale = max(0.25, 1.0 - 0.6 * (port_drawdown - 0.08) / 0.12)
                 
                 # Apply scaling factors to the calculated lot count
                 final_lot_count = max(1, int(lot_count * vol_scale * dd_scale))
