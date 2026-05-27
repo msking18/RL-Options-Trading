@@ -80,8 +80,8 @@ VOL_SCALE_HIGH_THRESHOLD = 0.35   # Lowered from 0.40 to trigger high-vol scalin
 VOL_SCALE_MED_THRESHOLD = 0.20    # Lowered from 0.25 to trigger med-vol scaling earlier
 
 # --- Minimum Hold Period ---
-MIN_HOLD_STEPS = 7              # Increased from 5: reduce churn (2580 trades at 3.2 avg hold was too noisy)
-EXIT_COOLDOWN_STEPS = 3         # Widened from 2: forces agent to be more selective about re-entry
+MIN_HOLD_STEPS = 5              # Reverted from 7: MIN_HOLD=7 caused training overfitting (51% WR in-sample, 15% OoS)
+EXIT_COOLDOWN_STEPS = 2         # Reverted from 3: longer cooldown narrowed strategy space causing OoS collapse
 MAX_TRADES_PER_DAY = 5          # Hard limit on trade entries per symbol per day
 SIM_AGGRESSION = 0.5            # Intra-candle SL/TP delta simulation factor
 
