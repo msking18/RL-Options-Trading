@@ -41,7 +41,7 @@ REWARD_LOG_SCALE_MULTIPLIER = 10.0   # Scale multiplier inside log1p to squash h
 VOLATILITY_EXPANSION_BONUS = 0.001  # Restored to May 18 value (proportional to REWARD_SCALE=5.0)
 DRAWDOWN_THRESHOLD_SOFT = 0.10   # Relaxed from 0.07: 7% was too aggressive for 6-month OoS windows
 DRAWDOWN_THRESHOLD_HARD = 0.20   # Relaxed from 0.15: 15% triggered on normal intraday fluctuations in long evals
-SOFT_PENALTY_SCALE = 0.25        # Compromise between 0.2 (too weak) and 0.3 (crushed Standard OoS)
+SOFT_PENALTY_SCALE = 0.20        # Reverted from 0.25 to May 25 baseline to prevent single-symbol specialization
 HARD_PENALTY_SCALE = 0.5         # Death Penalty Scale (Requested: 0.5)
 MIN_OPTION_PRICE = 5.0          # Minimum price to allow trade entry
 ENTRY_PENALTY = 0.0001          # Restored to May 18 value (proportional to REWARD_SCALE=5.0)

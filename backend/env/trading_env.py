@@ -847,14 +847,8 @@ class TradingEnv(gym.Env):
                 else:
                     vol_scale = 1.0
                 
-                # Dynamic Drawdown scaling to protect capital during portfolio drawdowns
-                # Relaxed: wider trigger (8% vs 5%), slower decay, higher floor (25% vs 10%)
-                dd_scale = 1.0
-                if port_drawdown > 0.08:
-                    dd_scale = max(0.25, 1.0 - 0.6 * (port_drawdown - 0.08) / 0.12)
-                
-                # Apply scaling factors to the calculated lot count
-                final_lot_count = max(1, int(lot_count * vol_scale * dd_scale))
+                # Apply scaling factors to the calculated lot count (vol_scale only, dd_scale removed to prevent single-symbol specialization)
+                final_lot_count = max(1, int(lot_count * vol_scale))
                 lot_size = final_lot_count * base_lot_size
                 
                 success = self.state_manager.enter_position(sym, 'LONG_CALL' if buy_calls[i] else 'LONG_PUT',
