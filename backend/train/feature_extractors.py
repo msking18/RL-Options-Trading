@@ -54,8 +54,10 @@ class Trading1DCNN(BaseFeaturesExtractor):
         total_intermediate_size = (self.combined_per_symbol_size * total_slots) + self.global_features_size
         self.linear = nn.Sequential(
             nn.Linear(total_intermediate_size, 512),
+            nn.LayerNorm(512),
             nn.ReLU(),
             nn.Linear(512, features_dim),
+            nn.LayerNorm(features_dim),
             nn.ReLU()
         )
 

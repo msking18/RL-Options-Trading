@@ -44,9 +44,11 @@ DRAWDOWN_THRESHOLD_HARD = 0.20   # Relaxed from 0.15: 15% triggered on normal in
 SOFT_PENALTY_SCALE = 0.20        # Reverted from 0.25 to May 25 baseline to prevent single-symbol specialization
 HARD_PENALTY_SCALE = 0.5         # Death Penalty Scale (Requested: 0.5)
 MIN_OPTION_PRICE = 5.0          # Minimum price to allow trade entry
-ENTRY_PENALTY = 0.0001          # Restored to May 18 value (proportional to REWARD_SCALE=5.0)
+ENTRY_PENALTY = 0.0002          # Increased from 0.0001 to discourage overtrading (1112 trades in May 29 run)
 MIN_TRADE_VALUE = 250000.0       # Minimum trade value to dilute fixed commissions
 DRAWDOWN_PENALTY_MULTIPLIER = 5.0  # Restored to May 18 value; /100.0 divisor re-added in trading_env.py
+CAPITAL_UTILIZATION_BONUS = 0.0002  # Small reward for deploying capital (2x ENTRY_PENALTY) in calm/normal regimes
+CAPITAL_UTILIZATION_THRESHOLD = 0.3 # Only reward if >30% of capital is deployed
 
 # --- Architecture Constants ---
 # (2*5*4) Call Greeks + (2*2) Prices + 1 Pos + 6 Tech + 3 Temp + 2 Risk + 2 Custom = 76
@@ -76,12 +78,21 @@ REGIME_VOL_HIGH = 0.25
 EARLY_STOPPING_PATIENCE = 5
 
 # --- Volatility Position Sizing ---
-VOL_SCALE_HIGH_THRESHOLD = 0.35   # Lowered from 0.40 to trigger high-vol scaling earlier
-VOL_SCALE_MED_THRESHOLD = 0.20    # Lowered from 0.25 to trigger med-vol scaling earlier
+VOL_SCALE_HIGH_THRESHOLD = 0.30   # Relaxed from 0.35 to allow slightly larger positions in moderate high-vol
+VOL_SCALE_MED_THRESHOLD = 0.18    # Relaxed from 0.20 to deploy more capital in standard conditions
+MAX_POSITION_CAPITAL_PCT = 0.15   # Hard cap: no single position can exceed 15% of total capital
 
-# --- Minimum Hold Period ---
-MIN_HOLD_STEPS = 5              # Reverted from 7: MIN_HOLD=7 caused training overfitting (51% WR in-sample, 15% OoS)
-EXIT_COOLDOWN_STEPS = 2         # Reverted from 3: longer cooldown narrowed strategy space causing OoS collapse
+# --- Minimum Hold Period (Static defaults, overridden by regime-conditional logic) ---
+MIN_HOLD_STEPS = 5              # Fallback baseline (used if regime detection fails)
+EXIT_COOLDOWN_STEPS = 2         # Fallback baseline (used if regime detection fails)
+
+# --- Regime-Conditional Hold/Exit ---
+MIN_HOLD_STEPS_LOW_VOL = 8      # Hold longer in calm markets to avoid whipsaw exits
+MIN_HOLD_STEPS_NORMAL = 5       # Standard baseline
+MIN_HOLD_STEPS_HIGH_VOL = 3     # Allow faster rotation in turbulent markets
+EXIT_COOLDOWN_LOW_VOL = 4       # Longer cooldown in calm markets to prevent whipsaw re-entry
+EXIT_COOLDOWN_NORMAL = 2        # Standard baseline
+EXIT_COOLDOWN_HIGH_VOL = 1      # Minimal cooldown in high vol for rapid rotation
 MAX_TRADES_PER_DAY = 5          # Hard limit on trade entries per symbol per day
 SIM_AGGRESSION = 0.5            # Intra-candle SL/TP delta simulation factor
 
@@ -144,7 +155,7 @@ def get_ppo_params():
         "gae_lambda": 0.95,
         "clip_range": 0.20,         # Widened from 0.15 to reduce clip fraction (was 0.35)
         "ent_coef": 0.01,            # Start higher for exploration, anneal to ENT_COEF_MIN=0.003
-        "vf_coef": 1.0,             # Increased from default 0.5 to prioritize Value Function accuracy
+        "vf_coef": 1.5,             # Increased from 1.0 to further prioritize VF accuracy (EV=0.61 still below target)
         "verbose": 1,
         "device": "auto" # Use CUDA if available
     }

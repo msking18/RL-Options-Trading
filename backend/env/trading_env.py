@@ -17,7 +17,9 @@ from backend.train.ppo_config import (
     DRAWDOWN_PENALTY_MULTIPLIER, MIN_TRADE_VALUE, STATIC_PER_SYMBOL_FEATURES,
     REWARD_SCALE, SIM_AGGRESSION, VOLATILITY_EXPANSION_BONUS,
     REGIME_VOL_LOW, REGIME_VOL_HIGH, MAX_STALE_DURATION, STALE_PENALTY_MULTIPLIER,
-    ZERO_SHOT_SYMBOLS, EXIT_COOLDOWN_STEPS, REWARD_LOG_SCALE_MULTIPLIER
+    ZERO_SHOT_SYMBOLS, EXIT_COOLDOWN_STEPS, REWARD_LOG_SCALE_MULTIPLIER,
+    MIN_HOLD_STEPS_LOW_VOL, MIN_HOLD_STEPS_NORMAL, MIN_HOLD_STEPS_HIGH_VOL,
+    MAX_POSITION_CAPITAL_PCT, CAPITAL_UTILIZATION_BONUS, CAPITAL_UTILIZATION_THRESHOLD
 )
 
 class TradingEnv(gym.Env):
@@ -655,7 +657,7 @@ class TradingEnv(gym.Env):
         if len(disable_no_sl) > 0:
             m[disable_no_sl, 4 + 0] = False # Mask out 'No SL/TP'
         
-        # Exit (3) is valid only if in position AND (hold duration >= MIN_HOLD_STEPS OR has a loss after >= 1 step)
+        # Exit (3) is valid only if in position AND (hold duration >= regime-conditional MIN_HOLD_STEPS OR has a loss after >= 1 step)
         # Check for loss condition: current_option_price < entry_price
         in_pos = (pos_types > 0)
         has_loss = np.zeros_like(in_pos, dtype=bool)
@@ -674,7 +676,15 @@ class TradingEnv(gym.Env):
             
             has_loss[in_pos] = (curr_opt_prices < entry_prices)
             
-        in_pos_ready = (pos_types > 0) & ((pos_durations >= MIN_HOLD_STEPS) | ((pos_durations >= 1) & has_loss))
+        # Regime-conditional minimum hold
+        regime = getattr(self, 'current_regime', 1)
+        if regime == 0:
+            effective_min_hold = MIN_HOLD_STEPS_LOW_VOL
+        elif regime == 2:
+            effective_min_hold = MIN_HOLD_STEPS_HIGH_VOL
+        else:
+            effective_min_hold = MIN_HOLD_STEPS_NORMAL
+        in_pos_ready = (pos_types > 0) & ((pos_durations >= effective_min_hold) | ((pos_durations >= 1) & has_loss))
         m[active_indices[in_pos_ready], 3] = True
 
     def reset(self, seed=None, options=None):
@@ -701,6 +711,7 @@ class TradingEnv(gym.Env):
         self.state_manager.reset()
         self.current_step = self.lookback_window
         self.high_water_mark = self.initial_capital
+        self.current_regime = 1  # Default to Normal regime on reset
         
         # 3. Initialize Mask & Obs
         self._update_action_masks_vectorized()
@@ -729,6 +740,16 @@ class TradingEnv(gym.Env):
         
         # Universal timestamp for trade logs
         current_timestamp = int(self.data_tensor[0, self.current_step, self.idx_timestamp])
+        
+        # Compute current volatility regime for regime-conditional logic
+        nifty_idx_regime = self.symbol_to_idx.get("Nifty 50", 0)
+        nifty_vol_regime = self.data_tensor[nifty_idx_regime, self.current_step, self.idx_vol]
+        if nifty_vol_regime < REGIME_VOL_LOW:
+            self.current_regime = 0  # Low Vol
+        elif nifty_vol_regime <= REGIME_VOL_HIGH:
+            self.current_regime = 1  # Normal
+        else:
+            self.current_regime = 2  # High Vol
         
         # Map flat actions back to per-slot [total_slots, 2]
         action_matrix = actions.reshape(self.total_slots, 2)
@@ -770,7 +791,7 @@ class TradingEnv(gym.Env):
                 rel_exits = np.where(exits)[0]
                 exit_prices = curr_data[rel_exits, exit_cols]
                 
-                self.state_manager.bulk_exit(exit_indices, exit_prices, timestamp=current_timestamp, extra_info=extra_info)
+                self.state_manager.bulk_exit(exit_indices, exit_prices, timestamp=current_timestamp, extra_info=extra_info, regime=self.current_regime)
                 
                 # Trade quality signal: count profitable exits for bonus applied later
                 self._exit_quality_bonus = 0.0
@@ -850,6 +871,12 @@ class TradingEnv(gym.Env):
                 # Apply scaling factors to the calculated lot count (vol_scale only, dd_scale removed to prevent single-symbol specialization)
                 final_lot_count = max(1, int(lot_count * vol_scale))
                 lot_size = final_lot_count * base_lot_size
+                
+                # SAFETY CAP: No single position can exceed MAX_POSITION_CAPITAL_PCT of total capital
+                max_position_value = self.state_manager.total_capital * MAX_POSITION_CAPITAL_PCT
+                position_value = option_price * lot_size
+                if position_value > max_position_value:
+                    lot_size = max(base_lot_size, int(max_position_value / option_price / base_lot_size) * base_lot_size)
                 
                 success = self.state_manager.enter_position(sym, 'LONG_CALL' if buy_calls[i] else 'LONG_PUT',
                                                curr_data[i, col], curr_data[i, self.idx_close],
@@ -952,7 +979,7 @@ class TradingEnv(gym.Env):
                     'is_sl': sl_hits[hitter_indices].tolist(),
                     'is_tp': tp_hits[hitter_indices].tolist()
                 }
-                self.state_manager.bulk_exit(exit_indices, exit_prices, timestamp=current_timestamp, extra_info=hit_info)
+                self.state_manager.bulk_exit(exit_indices, exit_prices, timestamp=current_timestamp, extra_info=hit_info, regime=self.current_regime)
                 
                 # Early SL Penalty: Discourage entries that hit SL within 3 steps of opening
                 early_sl_hits = sl_hits[hitter_indices] & (self.state_manager.pos_hold_dur[exit_indices] <= 3)
@@ -1027,6 +1054,14 @@ class TradingEnv(gym.Env):
                 (slot_actions[:, 0] == 0) & (self.state_manager.pos_type[active_sym_idxs] == 0)
             )
             reward += flat_holds * PATIENCE_BONUS
+        
+        # Capital Utilization Bonus: Encourage deploying capital when conditions are favorable
+        # Only active in Low Vol and Normal regimes (not High Vol where conservatism is correct)
+        if self.current_regime <= 1:
+            deployed_fraction = 1.0 - (self.state_manager.cash_balance / max(self.state_manager.total_capital, 1.0))
+            if deployed_fraction > CAPITAL_UTILIZATION_THRESHOLD:
+                utilization_bonus = CAPITAL_UTILIZATION_BONUS * min(deployed_fraction, 0.8)
+                reward += utilization_bonus
         
         # Death Penalty — tightened to 50% loss for faster learning signal
         if new_capital < (self.initial_capital * 0.5):

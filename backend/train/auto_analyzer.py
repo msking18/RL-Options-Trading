@@ -380,26 +380,78 @@ def run_analysis(eval_path):
     primary = next((r for r in current_data if r['name'] == PRIMARY_REGIME), current_data[0])
     analysis['trade_stats'] = analyze_trades(primary.get('trade_logs', []))
     
-    # 4. Diagnosis
-    comp = analysis['regime_comparisons'].get(PRIMARY_REGIME, {})
-    if comp:
-        if comp['sharpe_ratio']['diff_bench'] > 0: analysis['worked'].append("Improved Sharpe ratio vs. benchmark")
-        else: analysis['failed'].append("Sharpe ratio below benchmark")
+    # 4. Per-Regime Diagnosis (enriched — replaces simple primary-only checks)
+    for regime_name, metrics in analysis['regime_comparisons'].items():
+        # vs Benchmark deltas
+        ret_d = metrics['total_return_pct']['diff_bench']
+        sharpe_d = metrics['sharpe_ratio']['diff_bench']
+        dd_d = metrics['max_drawdown_pct']['diff_bench']
         
-        if comp['total_return_pct']['diff_bench'] > 0: analysis['worked'].append("Higher total return vs. benchmark")
-        else: analysis['failed'].append("Total return below benchmark")
+        # vs Previous deltas
+        ret_dp = metrics['total_return_pct']['diff_prev']
+        sharpe_dp = metrics['sharpe_ratio']['diff_prev']
+        dd_dp = metrics['max_drawdown_pct']['diff_prev']
         
-        if comp['max_drawdown_pct']['diff_bench'] < 0: analysis['worked'].append("Reduced max drawdown vs. benchmark")
+        # Wins vs benchmark
+        if ret_d > 0 and sharpe_d > 0:
+            analysis['worked'].append(f"{regime_name}: Beats benchmark on return (+{ret_d:.1f}%) and Sharpe (+{sharpe_d:.1f})")
+        elif ret_d > 0:
+            analysis['worked'].append(f"{regime_name}: Return beats benchmark (+{ret_d:.1f}%)")
+        elif sharpe_d > 0:
+            analysis['worked'].append(f"{regime_name}: Sharpe beats benchmark (+{sharpe_d:.2f})")
         
-    # 5. Suggestions
+        if dd_d < -2.0:
+            analysis['worked'].append(f"{regime_name}: Drawdown improved vs benchmark ({dd_d:+.1f}pp)")
+        
+        # Regressions vs previous run
+        if ret_dp < -50:
+            analysis['failed'].append(f"{regime_name}: Major return regression vs previous ({ret_dp:+.1f}%)")
+        elif ret_d < 0 and sharpe_d < 0:
+            analysis['failed'].append(f"{regime_name}: Below benchmark on return ({ret_d:+.1f}%) and Sharpe ({sharpe_d:+.1f})")
+        
+        if dd_dp > 10:
+            analysis['failed'].append(f"{regime_name}: Drawdown worsened significantly vs previous ({dd_dp:+.1f}pp)")
+        
+        # Specific failure patterns
+        curr_pf = metrics['profit_factor']['current']
+        curr_wr = metrics['win_rate_pct']['current']
+        prev_wr = metrics['win_rate_pct']['previous']
+        if curr_pf < 1.0:
+            analysis['failed'].append(f"{regime_name}: Net money loser (PF={curr_pf:.2f})")
+        if curr_wr < 20 and prev_wr > 50:
+            analysis['failed'].append(f"{regime_name}: Win rate collapsed ({prev_wr:.0f}% → {curr_wr:.0f}%)")
+    
+    # Overtrading Detection
+    if analysis['trade_stats']['total_trades'] > 800 and analysis['trade_stats']['avg_hold'] < 4.0:
+        analysis['suggestions'].append(
+            f"Overtrading detected: {analysis['trade_stats']['total_trades']} trades with "
+            f"{analysis['trade_stats']['avg_hold']:.1f} avg hold. Consider increasing ENTRY_PENALTY or MIN_HOLD_STEPS."
+        )
+    
+    # 5. Suggestions (general + per-regime)
     if analysis['tb_analysis'].get('final_clip', 0) > 0.35:
         analysis['suggestions'].append("High clip fraction: Consider reducing learning_rate or clip_range.")
     if analysis['trade_stats']['total_trades'] < 10:
         analysis['suggestions'].append("Low trade count: Check entry_penalty or increase exploration (entropy).")
     if analysis['tb_analysis'].get('final_ev', 0) < 0.1:
         analysis['suggestions'].append("Low Explained Variance: Policy is not learning from value function. Check reward scale.")
-    if comp.get('max_drawdown_pct', {}).get('current', 0) > 20:
-        analysis['suggestions'].append("High Drawdown: Agent is losing significant capital. Consider increasing drawdown penalty or tightening stop losses.")
+    
+    # Per-regime suggestions: collapse detection
+    for regime_name, metrics in analysis['regime_comparisons'].items():
+        curr_ret = metrics['total_return_pct']['current']
+        prev_ret = metrics['total_return_pct']['previous']
+        curr_dd = metrics['max_drawdown_pct']['current']
+        
+        if prev_ret > 50 and curr_ret < -10:
+            analysis['suggestions'].append(
+                f"Regime collapse in '{regime_name}': {prev_ret:+.0f}% → {curr_ret:+.0f}%. "
+                "Consider regime-conditional parameters."
+            )
+        if curr_dd > 20:
+            analysis['suggestions'].append(
+                f"High drawdown in '{regime_name}' ({curr_dd:.1f}%): "
+                "Consider increasing drawdown penalty or tightening stop losses for this regime."
+            )
         
     # 6. Promotion
     promoted, reason = check_promotion(current_data, benchmark_data)

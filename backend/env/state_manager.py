@@ -4,7 +4,8 @@ from backend.train.ppo_config import (
     COMMISSION_TIERS, COMMISSION_TIER_DEFAULT, MIN_OPTION_PRICE, 
     MAX_TRADES_PER_DAY, EXIT_COOLDOWN_STEPS, BROKERAGE_PER_SIDE,
     STT_SELL_RATE, NSE_TRANS_CHARGES_RATE, GST_RATE, SEBI_FEES_RATE,
-    STAMP_DUTY_BUY_RATE
+    STAMP_DUTY_BUY_RATE,
+    EXIT_COOLDOWN_LOW_VOL, EXIT_COOLDOWN_NORMAL, EXIT_COOLDOWN_HIGH_VOL
 )
 
 class TradingStateManager:
@@ -141,7 +142,7 @@ class TradingStateManager:
         return True
 
     def bulk_exit(self, indices: np.ndarray, current_option_prices: np.ndarray, 
-                  timestamp: int = 0, extra_info: dict = None):
+                  timestamp: int = 0, extra_info: dict = None, regime: int = 1):
         """
         Processes multiple liquidations in a single vectorized pass.
         Eliminates the Python for-loop overhead for SL/TP and Expiry hits.
@@ -230,13 +231,13 @@ class TradingStateManager:
         self.pos_expiry_index[indices] = 0
         self.pos_sl_price[indices] = 0.0
         self.pos_tp_price[indices] = 0.0
-        # Start cooldown timer for exited symbols
-        self.exit_cooldown[indices] = EXIT_COOLDOWN_STEPS
+        # Start cooldown timer for exited symbols (regime-aware)
+        self.set_exit_cooldown(indices, regime)
         
         self._update_total_capital()
         return np.sum(realized_pnls)
 
-    def exit_position(self, symbol: str, current_option_price: float, extra_info: dict = None):
+    def exit_position(self, symbol: str, current_option_price: float, extra_info: dict = None, regime: int = 1):
         idx = self.symbol_to_idx.get(symbol)
         if idx is None or self.pos_type[idx] == self.TYPE_NONE:
             return 0.0
@@ -302,8 +303,8 @@ class TradingStateManager:
         self.pos_expiry_index[idx] = 0
         self.pos_sl_price[idx] = 0.0
         self.pos_tp_price[idx] = 0.0
-        # Start cooldown timer for exited symbol
-        self.exit_cooldown[idx] = EXIT_COOLDOWN_STEPS
+        # Start cooldown timer for exited symbol (regime-aware)
+        self.set_exit_cooldown(np.array([idx]), regime)
         
         self._update_total_capital()
         return realized_pnl
@@ -315,6 +316,17 @@ class TradingStateManager:
     def reset_daily_stats(self):
         """Resets daily limits and tracking."""
         self.trades_today.fill(0)
+
+    def set_exit_cooldown(self, indices: np.ndarray, regime: int = 1):
+        """Sets exit cooldown based on current volatility regime.
+        Regime: 0=Low Vol, 1=Normal, 2=High Vol
+        """
+        if regime == 0:  # Low Vol — longer cooldown to prevent whipsaw re-entry
+            self.exit_cooldown[indices] = EXIT_COOLDOWN_LOW_VOL
+        elif regime == 2:  # High Vol — minimal cooldown for rapid rotation
+            self.exit_cooldown[indices] = EXIT_COOLDOWN_HIGH_VOL
+        else:  # Normal
+            self.exit_cooldown[indices] = EXIT_COOLDOWN_NORMAL
 
     def get_state_vector(self) -> np.ndarray:
         """
