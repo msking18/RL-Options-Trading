@@ -44,7 +44,7 @@ DRAWDOWN_THRESHOLD_HARD = 0.20   # Relaxed from 0.15: 15% triggered on normal in
 SOFT_PENALTY_SCALE = 0.20        # Reverted from 0.25 to May 25 baseline to prevent single-symbol specialization
 HARD_PENALTY_SCALE = 0.5         # Death Penalty Scale (Requested: 0.5)
 MIN_OPTION_PRICE = 5.0          # Minimum price to allow trade entry
-ENTRY_PENALTY = 0.0002          # Increased from 0.0001 to discourage overtrading (1112 trades in May 29 run)
+ENTRY_PENALTY = 0.0005          # Increased to penalize low-conviction entries and encourage holding
 MIN_TRADE_VALUE = 250000.0       # Minimum trade value to dilute fixed commissions
 DRAWDOWN_PENALTY_MULTIPLIER = 5.0  # Restored to May 18 value; /100.0 divisor re-added in trading_env.py
 CAPITAL_UTILIZATION_BONUS = 0.0002  # Small reward for deploying capital (2x ENTRY_PENALTY) in calm/normal regimes
@@ -87,8 +87,8 @@ MIN_HOLD_STEPS = 5              # Fallback baseline (used if regime detection fa
 EXIT_COOLDOWN_STEPS = 2         # Fallback baseline (used if regime detection fails)
 
 # --- Regime-Conditional Hold/Exit ---
-MIN_HOLD_STEPS_LOW_VOL = 8      # Hold longer in calm markets to avoid whipsaw exits
-MIN_HOLD_STEPS_NORMAL = 5       # Standard baseline
+MIN_HOLD_STEPS_LOW_VOL = 10     # Hold longer in calm markets to avoid whipsaw exits (increased for trend capture)
+MIN_HOLD_STEPS_NORMAL = 6       # Standard baseline (increased for trend capture)
 MIN_HOLD_STEPS_HIGH_VOL = 3     # Allow faster rotation in turbulent markets
 EXIT_COOLDOWN_LOW_VOL = 4       # Longer cooldown in calm markets to prevent whipsaw re-entry
 EXIT_COOLDOWN_NORMAL = 2        # Standard baseline

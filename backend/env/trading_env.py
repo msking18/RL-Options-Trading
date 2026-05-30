@@ -657,25 +657,7 @@ class TradingEnv(gym.Env):
         if len(disable_no_sl) > 0:
             m[disable_no_sl, 4 + 0] = False # Mask out 'No SL/TP'
         
-        # Exit (3) is valid only if in position AND (hold duration >= regime-conditional MIN_HOLD_STEPS OR has a loss after >= 1 step)
-        # Check for loss condition: current_option_price < entry_price
-        in_pos = (pos_types > 0)
-        has_loss = np.zeros_like(in_pos, dtype=bool)
-        if np.any(in_pos):
-            in_pos_sym_idxs = active_sym_idxs[in_pos]
-            opened_e_idxs = self.state_manager.pos_expiry_index[in_pos_sym_idxs]
-            p_types = self.state_manager.pos_type[in_pos_sym_idxs]
-            
-            # Map dynamic price columns
-            opt_cols = np.where(opened_e_idxs == 0, self.idx_call_e0, self.idx_call_e1)
-            opt_cols = np.where(p_types == 2, opt_cols + 1, opt_cols) # Put option price is the next column
-            
-            # Fetch current prices and entry prices
-            curr_opt_prices = self.data_tensor[in_pos_sym_idxs, self.current_step, opt_cols]
-            entry_prices = self.state_manager.pos_entry_price[in_pos_sym_idxs]
-            
-            has_loss[in_pos] = (curr_opt_prices < entry_prices)
-            
+        # Exit (3) is valid only if in position AND hold duration >= regime-conditional MIN_HOLD_STEPS
         # Regime-conditional minimum hold
         regime = getattr(self, 'current_regime', 1)
         if regime == 0:
@@ -684,7 +666,7 @@ class TradingEnv(gym.Env):
             effective_min_hold = MIN_HOLD_STEPS_HIGH_VOL
         else:
             effective_min_hold = MIN_HOLD_STEPS_NORMAL
-        in_pos_ready = (pos_types > 0) & ((pos_durations >= effective_min_hold) | ((pos_durations >= 1) & has_loss))
+        in_pos_ready = (pos_types > 0) & (pos_durations >= effective_min_hold)
         m[active_indices[in_pos_ready], 3] = True
 
     def reset(self, seed=None, options=None):
