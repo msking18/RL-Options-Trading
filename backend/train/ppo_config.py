@@ -47,8 +47,8 @@ MIN_OPTION_PRICE = 5.0          # Minimum price to allow trade entry
 ENTRY_PENALTY = 0.0005          # Increased to penalize low-conviction entries and encourage holding
 MIN_TRADE_VALUE = 250000.0       # Minimum trade value to dilute fixed commissions
 DRAWDOWN_PENALTY_MULTIPLIER = 5.0  # Restored to May 18 value; /100.0 divisor re-added in trading_env.py
-CAPITAL_UTILIZATION_BONUS = 0.0002  # Small reward for deploying capital (2x ENTRY_PENALTY) in calm/normal regimes
-CAPITAL_UTILIZATION_THRESHOLD = 0.3 # Only reward if >30% of capital is deployed
+CAPITAL_UTILIZATION_BONUS = 0.0002  # Small reward for having active positions in calm/normal regimes
+CAPITAL_UTILIZATION_MIN_POSITIONS = 2  # Only reward if >= 2 positions are open (not capital-fraction based)
 
 # --- Architecture Constants ---
 # (2*5*4) Call Greeks + (2*2) Prices + 1 Pos + 6 Tech + 3 Temp + 2 Risk + 2 Custom = 76
@@ -87,10 +87,10 @@ MIN_HOLD_STEPS = 5              # Fallback baseline (used if regime detection fa
 EXIT_COOLDOWN_STEPS = 2         # Fallback baseline (used if regime detection fails)
 
 # --- Regime-Conditional Hold/Exit ---
-MIN_HOLD_STEPS_LOW_VOL = 10     # Hold longer in calm markets to avoid whipsaw exits (increased for trend capture)
+MIN_HOLD_STEPS_LOW_VOL = 5      # Restored — 10 was too restrictive, trapped losers through theta decay
 MIN_HOLD_STEPS_NORMAL = 6       # Standard baseline (increased for trend capture)
 MIN_HOLD_STEPS_HIGH_VOL = 3     # Allow faster rotation in turbulent markets
-EXIT_COOLDOWN_LOW_VOL = 4       # Longer cooldown in calm markets to prevent whipsaw re-entry
+EXIT_COOLDOWN_LOW_VOL = 2       # Restored — 4 was too restrictive, standard cooldown works
 EXIT_COOLDOWN_NORMAL = 2        # Standard baseline
 EXIT_COOLDOWN_HIGH_VOL = 1      # Minimal cooldown in high vol for rapid rotation
 MAX_TRADES_PER_DAY = 5          # Hard limit on trade entries per symbol per day
@@ -155,7 +155,7 @@ def get_ppo_params():
         "gae_lambda": 0.95,
         "clip_range": 0.20,         # Widened from 0.15 to reduce clip fraction (was 0.35)
         "ent_coef": 0.01,            # Start higher for exploration, anneal to ENT_COEF_MIN=0.003
-        "vf_coef": 1.5,             # Increased from 1.0 to further prioritize VF accuracy (EV=0.61 still below target)
+        "vf_coef": 1.0,             # Reverted — 1.5 caused EV decline in 2nd half of training
         "verbose": 1,
         "device": "auto" # Use CUDA if available
     }

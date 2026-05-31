@@ -270,7 +270,7 @@ def main():
     else:
         # Smart checkpoint selection
         source_map = {
-            "best":       ("best_model.zip",     "vec_normalize.pkl"),
+            "best":       ("best_model.zip",     "vec_normalize_best.pkl"),
             "best_ev":    ("ppo_best_ev.zip",    "vec_normalize_best_ev.pkl"),
             "early_stop": ("ppo_early_stop.zip", "vec_normalize_early_stop.pkl"),
             "latest":     ("ppo_latest.zip",     "vec_normalize.pkl"),

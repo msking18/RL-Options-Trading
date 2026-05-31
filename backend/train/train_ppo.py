@@ -148,6 +148,25 @@ class StabilityGuardCallback(BaseCallback):
 
         return True
 
+class SaveBestNormalizeCallback(BaseCallback):
+    """Saves VecNormalize stats whenever EvalCallback saves a new best model."""
+    def __init__(self, eval_callback, save_path, verbose=0):
+        super().__init__(verbose)
+        self.eval_callback = eval_callback
+        self.save_path = save_path
+        self._last_best = -float('inf')
+
+    def _on_step(self) -> bool:
+        if hasattr(self.eval_callback, 'best_mean_reward'):
+            if self.eval_callback.best_mean_reward > self._last_best:
+                self._last_best = self.eval_callback.best_mean_reward
+                if hasattr(self.training_env, 'save'):
+                    stats_path = os.path.join(self.save_path, "vec_normalize_best.pkl")
+                    self.training_env.save(stats_path)
+                    if self.verbose:
+                        print(f"[SaveBestNormalize] Saved VecNormalize for best_model (reward={self._last_best:.2f})")
+        return True
+
 def mask_fn(env):
     return env.action_masks()
 
@@ -367,6 +386,11 @@ def train():
                 verbose=1
             ),
             eval_callback,
+            SaveBestNormalizeCallback(
+                eval_callback=eval_callback,
+                save_path=MODEL_DIR,
+                verbose=1
+            ),
             RewardDecompCallback()
         ]
     )

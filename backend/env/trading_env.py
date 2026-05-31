@@ -19,7 +19,7 @@ from backend.train.ppo_config import (
     REGIME_VOL_LOW, REGIME_VOL_HIGH, MAX_STALE_DURATION, STALE_PENALTY_MULTIPLIER,
     ZERO_SHOT_SYMBOLS, EXIT_COOLDOWN_STEPS, REWARD_LOG_SCALE_MULTIPLIER,
     MIN_HOLD_STEPS_LOW_VOL, MIN_HOLD_STEPS_NORMAL, MIN_HOLD_STEPS_HIGH_VOL,
-    MAX_POSITION_CAPITAL_PCT, CAPITAL_UTILIZATION_BONUS, CAPITAL_UTILIZATION_THRESHOLD
+    MAX_POSITION_CAPITAL_PCT, CAPITAL_UTILIZATION_BONUS, CAPITAL_UTILIZATION_MIN_POSITIONS
 )
 
 class TradingEnv(gym.Env):
@@ -774,18 +774,6 @@ class TradingEnv(gym.Env):
                 exit_prices = curr_data[rel_exits, exit_cols]
                 
                 self.state_manager.bulk_exit(exit_indices, exit_prices, timestamp=current_timestamp, extra_info=extra_info, regime=self.current_regime)
-                
-                # Trade quality signal: count profitable exits for bonus applied later
-                self._exit_quality_bonus = 0.0
-                rel_exits = np.where(exits)[0]
-                logs = self.state_manager.trade_logs[-len(exit_indices):]
-                for j, log in enumerate(logs):
-                    if log.get('pnl', 0) > 0:
-                        bonus = 0.001
-                        # Boost bonus if exiting profitably in high vol
-                        if curr_data[rel_exits[j], self.idx_vol] > VOL_SCALE_MED_THRESHOLD:
-                            bonus *= 2.0
-                        self._exit_quality_bonus += bonus
             
             # Enters (Action 1: Buy Call, 2: Buy Put) - MUST respect masks
             buy_calls = (slot_actions[:, 0] == 1) & active_masks[:, 1]
@@ -1021,10 +1009,6 @@ class TradingEnv(gym.Env):
         scaled_delta = np.sign(raw_delta) * np.log1p(abs(raw_delta) * REWARD_SCALE * REWARD_LOG_SCALE_MULTIPLIER)
         reward = scaled_delta - total_penalty
         
-        # Apply trade quality bonus accumulated from profitable exits
-        if hasattr(self, '_exit_quality_bonus') and self._exit_quality_bonus > 0:
-            reward += self._exit_quality_bonus
-            self._exit_quality_bonus = 0.0
         
         # Apply entry penalties if any new positions were opened
         if 'num_entries' in locals() and num_entries > 0:
@@ -1040,9 +1024,9 @@ class TradingEnv(gym.Env):
         # Capital Utilization Bonus: Encourage deploying capital when conditions are favorable
         # Only active in Low Vol and Normal regimes (not High Vol where conservatism is correct)
         if self.current_regime <= 1:
-            deployed_fraction = 1.0 - (self.state_manager.cash_balance / max(self.state_manager.total_capital, 1.0))
-            if deployed_fraction > CAPITAL_UTILIZATION_THRESHOLD:
-                utilization_bonus = CAPITAL_UTILIZATION_BONUS * min(deployed_fraction, 0.8)
+            active_positions = int(np.sum(self.state_manager.pos_type > 0))
+            if active_positions >= CAPITAL_UTILIZATION_MIN_POSITIONS:
+                utilization_bonus = CAPITAL_UTILIZATION_BONUS * min(active_positions, self.total_slots)
                 reward += utilization_bonus
         
         # Death Penalty — tightened to 50% loss for faster learning signal
