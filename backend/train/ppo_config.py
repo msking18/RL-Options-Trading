@@ -11,9 +11,9 @@ LOG_DIR = os.getenv("LOG_DIR", "ppo_trading_tensorboard")
 TOTAL_TIMESTEPS = 5_000_000 # Increased budget for stabilization post-regression
 
 # --- Annealing Configuration ---
-INITIAL_LR = 2e-5               # Reduced from 3e-5 to lower clip fraction (was 0.35)
-FINAL_LR = 1e-5                 # Terminal learning rate
-ENT_COEF_MIN = 0.008            # Restored to May 18 working value for sufficient exploration
+INITIAL_LR = 3e-5               # Tuned to 3e-5 for stable/faster training convergence
+FINAL_LR = 1.5e-5               # Terminal learning rate
+ENT_COEF_MIN = 0.005            # Adjusted to allow stronger exploitation at later training stages
 
 # --- Stability Guard ---
 CLIP_FRACTION_THRESHOLD = 0.35  # Early-stop if clip_fraction exceeds this for CLIP_PATIENCE intervals
@@ -37,7 +37,7 @@ STAMP_DUTY_BUY_RATE = 0.00003         # 0.003% of premium value (Buy side only)
 # --- Reward Tuning ---
 PATIENCE_BONUS = 0.0001          # Small tiebreaker; ~4% of typical step reward at REWARD_SCALE=5.0
 REWARD_SCALE = 5.0               # Restored: amplifies capital-delta for learnable gradient signal
-REWARD_LOG_SCALE_MULTIPLIER = 10.0   # Scale multiplier inside log1p to squash high-variance outliers
+REWARD_LOG_SCALE_MULTIPLIER = 7.5   # Balanced to 7.5 to improve value network linearity without losing signal strength
 VOLATILITY_EXPANSION_BONUS = 0.001  # Restored to May 18 value (proportional to REWARD_SCALE=5.0)
 DRAWDOWN_THRESHOLD_SOFT = 0.10   # Relaxed from 0.07: 7% was too aggressive for 6-month OoS windows
 DRAWDOWN_THRESHOLD_HARD = 0.20   # Relaxed from 0.15: 15% triggered on normal intraday fluctuations in long evals
@@ -49,6 +49,7 @@ MIN_TRADE_VALUE = 250000.0       # Minimum trade value to dilute fixed commissio
 DRAWDOWN_PENALTY_MULTIPLIER = 5.0  # Restored to May 18 value; /100.0 divisor re-added in trading_env.py
 CAPITAL_UTILIZATION_BONUS = 0.0002  # Small reward for having active positions in calm/normal regimes
 CAPITAL_UTILIZATION_MIN_POSITIONS = 2  # Only reward if >= 2 positions are open (not capital-fraction based)
+POSITION_CAPITAL_PCT = 0.10        # Target 10% of portfolio capital per symbol for dynamic position sizing
 
 # --- Architecture Constants ---
 # (2*5*4) Call Greeks + (2*2) Prices + 1 Pos + 6 Tech + 3 Temp + 2 Risk + 2 Custom = 76
@@ -173,7 +174,7 @@ def get_ppo_params():
             features_extractor_class=Trading1DCNN,
             features_extractor_kwargs=dict(features_dim=512, lookback_window=LOOKBACK_WINDOW, total_slots=TOTAL_SLOTS),
             share_features_extractor=False, # Decouple Policy and Value networks to improve EV
-            net_arch=dict(pi=[256, 256], vf=[512, 512, 512, 256])
+            net_arch=dict(pi=[256, 256], vf=[256, 256, 256])
         )
     else:
         print("Using Architecture: MLP (Standard Dense Layers)")

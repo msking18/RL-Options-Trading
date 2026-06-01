@@ -19,7 +19,8 @@ from backend.train.ppo_config import (
     REGIME_VOL_LOW, REGIME_VOL_HIGH, MAX_STALE_DURATION, STALE_PENALTY_MULTIPLIER,
     ZERO_SHOT_SYMBOLS, EXIT_COOLDOWN_STEPS, REWARD_LOG_SCALE_MULTIPLIER,
     MIN_HOLD_STEPS_LOW_VOL, MIN_HOLD_STEPS_NORMAL, MIN_HOLD_STEPS_HIGH_VOL,
-    MAX_POSITION_CAPITAL_PCT, CAPITAL_UTILIZATION_BONUS, CAPITAL_UTILIZATION_MIN_POSITIONS
+    MAX_POSITION_CAPITAL_PCT, CAPITAL_UTILIZATION_BONUS, CAPITAL_UTILIZATION_MIN_POSITIONS,
+    POSITION_CAPITAL_PCT
 )
 
 class TradingEnv(gym.Env):
@@ -825,8 +826,9 @@ class TradingEnv(gym.Env):
                 option_price = curr_data[i, col]
                 base_lot_size = getattr(self, 'lot_size_map', {}).get(sym, 50)
                 
-                # Target units based on MIN_TRADE_VALUE
-                target_units = MIN_TRADE_VALUE / max(option_price, 1e-6)
+                # Target units based on dynamic capital scaling (POSITION_CAPITAL_PCT)
+                target_value = max(MIN_TRADE_VALUE, self.state_manager.total_capital * POSITION_CAPITAL_PCT)
+                target_units = target_value / max(option_price, 1e-6)
                 # Round to nearest lot size
                 lot_count = max(1, round(target_units / base_lot_size))
                 
