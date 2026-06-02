@@ -32,7 +32,7 @@ class TradingStateManager:
         
         # Initialize Array-based state
         self.pos_type = np.zeros(self.num_symbols, dtype=np.int8)
-        self.pos_qty = np.zeros(self.num_symbols, dtype=np.int32)
+        self.pos_qty = np.zeros(self.num_symbols, dtype=np.int64)
         self.pos_entry_price = np.zeros(self.num_symbols, dtype=np.float32)
         self.pos_curr_value = np.zeros(self.num_symbols, dtype=np.float32)
         self.pos_hold_dur = np.zeros(self.num_symbols, dtype=np.int32)
