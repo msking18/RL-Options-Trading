@@ -49,7 +49,7 @@ MIN_TRADE_VALUE = 250000.0       # Minimum trade value to dilute fixed commissio
 DRAWDOWN_PENALTY_MULTIPLIER = 5.0  # Restored to May 18 value; /100.0 divisor re-added in trading_env.py
 CAPITAL_UTILIZATION_BONUS = 0.0002  # Small reward for having active positions in calm/normal regimes
 CAPITAL_UTILIZATION_MIN_POSITIONS = 2  # Only reward if >= 2 positions are open (not capital-fraction based)
-POSITION_CAPITAL_PCT = 0.10        # Target 10% of portfolio capital per symbol for dynamic position sizing
+POSITION_CAPITAL_PCT = 0.05        # Reduced from 0.10: 10% caused 60% max exposure → death spiral. 5% limits to 30% max.
 
 # --- Architecture Constants ---
 # (2*5*4) Call Greeks + (2*2) Prices + 1 Pos + 6 Tech + 3 Temp + 2 Risk + 2 Custom = 76
@@ -174,7 +174,7 @@ def get_ppo_params():
             features_extractor_class=Trading1DCNN,
             features_extractor_kwargs=dict(features_dim=512, lookback_window=LOOKBACK_WINDOW, total_slots=TOTAL_SLOTS),
             share_features_extractor=False, # Decouple Policy and Value networks to improve EV
-            net_arch=dict(pi=[256, 256], vf=[256, 256, 256])
+            net_arch=dict(pi=[256, 256], vf=[512, 512, 512, 256])
         )
     else:
         print("Using Architecture: MLP (Standard Dense Layers)")

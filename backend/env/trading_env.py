@@ -1031,10 +1031,17 @@ class TradingEnv(gym.Env):
                 utilization_bonus = CAPITAL_UTILIZATION_BONUS * min(active_positions, self.total_slots)
                 reward += utilization_bonus
         
-        # Death Penalty — tightened to 50% loss for faster learning signal
+        # Progressive Capital Erosion Warning — gives gradient signal before death
+        # Ramps penalty linearly between 70% and 50% capital to teach risk avoidance
+        capital_ratio = new_capital / self.initial_capital
+        if capital_ratio < 0.70:
+            erosion_penalty = (0.70 - capital_ratio) * REWARD_SCALE * 0.2
+            reward -= erosion_penalty
+
+        # Death Penalty — softened to prevent critic value function explosion
         if new_capital < (self.initial_capital * 0.5):
             done = True
-            reward -= 1.0 * REWARD_SCALE  # Scale-aware: -5.0 at REWARD_SCALE=5.0
+            reward -= 0.5 * REWARD_SCALE  # Halved: -2.5 at REWARD_SCALE=5.0 (was -5.0)
             
         self._update_action_masks_vectorized()
         info = {"capital": new_capital}
