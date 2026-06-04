@@ -95,7 +95,8 @@ EXIT_COOLDOWN_LOW_VOL = 2       # Restored — 4 was too restrictive, standard c
 EXIT_COOLDOWN_NORMAL = 2        # Standard baseline
 EXIT_COOLDOWN_HIGH_VOL = 1      # Minimal cooldown in high vol for rapid rotation
 MAX_TRADES_PER_DAY = 5          # Hard limit on trade entries per symbol per day
-SIM_AGGRESSION = 0.5            # Intra-candle SL/TP delta simulation factor
+SIM_AGGRESSION = 0.4            # Reduced from 0.5: lower false SL triggers from intra-candle simulation
+EARLY_EXIT_PENALTY_SCALE = 0.0008  # Graduated penalty for exiting before MIN_HOLD_STEPS (replaces hard action mask)
 
 USE_CNN = True         # Toggle for 1D-CNN vs MlpPolicy
 
@@ -174,7 +175,7 @@ def get_ppo_params():
             features_extractor_class=Trading1DCNN,
             features_extractor_kwargs=dict(features_dim=512, lookback_window=LOOKBACK_WINDOW, total_slots=TOTAL_SLOTS),
             share_features_extractor=False, # Decouple Policy and Value networks to improve EV
-            net_arch=dict(pi=[256, 256], vf=[512, 512, 512, 256])
+            net_arch=dict(pi=[512, 256], vf=[512, 512, 512, 256])  # Policy widened from [256,256] to match critic capacity
         )
     else:
         print("Using Architecture: MLP (Standard Dense Layers)")

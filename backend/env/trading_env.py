@@ -20,7 +20,7 @@ from backend.train.ppo_config import (
     ZERO_SHOT_SYMBOLS, EXIT_COOLDOWN_STEPS, REWARD_LOG_SCALE_MULTIPLIER,
     MIN_HOLD_STEPS_LOW_VOL, MIN_HOLD_STEPS_NORMAL, MIN_HOLD_STEPS_HIGH_VOL,
     MAX_POSITION_CAPITAL_PCT, CAPITAL_UTILIZATION_BONUS, CAPITAL_UTILIZATION_MIN_POSITIONS,
-    POSITION_CAPITAL_PCT
+    POSITION_CAPITAL_PCT, EARLY_EXIT_PENALTY_SCALE
 )
 
 class TradingEnv(gym.Env):
@@ -642,15 +642,13 @@ class TradingEnv(gym.Env):
         m[active_indices[can_enter & (call_prices >= MIN_OPTION_PRICE)], 1] = True
         m[active_indices[can_enter & (put_prices >= MIN_OPTION_PRICE)], 2] = True
         
-        # If high volatility, force Tight SL only (mask out all other risk options)
-        # Risk Categories: 0:No SL, 1:Tight, 2:Conservative, 3:Standard
+        # If high volatility, disable 'No SL' only. Allow Tight, Conservative, and Standard.
+        # Relaxed from forcing Tight-only — the model can learn appropriate risk sizing in high vol.
         high_vol_indices = active_indices[is_high_vol]
         if len(high_vol_indices) > 0:
-            m[high_vol_indices, 4 + 0] = False # Mask out 'No SL'
-            m[high_vol_indices, 4 + 2] = False # Mask out 'Conservative'
-            m[high_vol_indices, 4 + 3] = False # Mask out 'Standard'
+            m[high_vol_indices, 4 + 0] = False # Mask out 'No SL' (too risky in high vol)
             
-        # Suggestion 3: Disable risk_idx = 0 (No SL/TP) if volatility > VOL_SCALE_MED_THRESHOLD or in zero-shot regimes
+        # Disable risk_idx = 0 (No SL/TP) if volatility > VOL_SCALE_MED_THRESHOLD or in zero-shot regimes
         is_med_vol = curr_vols > VOL_SCALE_MED_THRESHOLD
         is_zero_shot = np.array([self.symbol_list[idx] in ZERO_SHOT_SYMBOLS for idx in active_sym_idxs])
         
@@ -658,17 +656,10 @@ class TradingEnv(gym.Env):
         if len(disable_no_sl) > 0:
             m[disable_no_sl, 4 + 0] = False # Mask out 'No SL/TP'
         
-        # Exit (3) is valid only if in position AND hold duration >= regime-conditional MIN_HOLD_STEPS
-        # Regime-conditional minimum hold
-        regime = getattr(self, 'current_regime', 1)
-        if regime == 0:
-            effective_min_hold = MIN_HOLD_STEPS_LOW_VOL
-        elif regime == 2:
-            effective_min_hold = MIN_HOLD_STEPS_HIGH_VOL
-        else:
-            effective_min_hold = MIN_HOLD_STEPS_NORMAL
-        in_pos_ready = (pos_types > 0) & (pos_durations >= effective_min_hold)
-        m[active_indices[in_pos_ready], 3] = True
+        # Exit (3) is valid for ALL open positions (graduated penalty replaces hard mask)
+        # The early exit penalty in step() discourages premature exits via reward signal
+        in_pos = (pos_types > 0)
+        m[active_indices[in_pos], 3] = True
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -708,6 +699,7 @@ class TradingEnv(gym.Env):
         # Track portfolio high-water mark and current drawdown
         self.high_water_mark = max(self.high_water_mark, prev_capital)
         port_drawdown = (self.high_water_mark - prev_capital) / self.high_water_mark if self.high_water_mark > 0 else 0.0
+        total_penalty = 0.0  # Accumulated across exit penalties + position penalties
         
         # 0. Daily Reset Check (Timestamp-based date change detection)
         if self.current_step > self.lookback_window:
@@ -758,8 +750,20 @@ class TradingEnv(gym.Env):
             
             exits = (slot_actions[:, 0] == 3) & active_masks[:, 3]
             
+            # Compute regime-conditional min hold for graduated exit penalty
+            if self.current_regime == 0:
+                effective_min_hold = MIN_HOLD_STEPS_LOW_VOL
+            elif self.current_regime == 2:
+                effective_min_hold = MIN_HOLD_STEPS_HIGH_VOL
+            else:
+                effective_min_hold = MIN_HOLD_STEPS_NORMAL
+            
             if np.any(exits):
                 exit_indices = active_sym_idxs[exits]
+                
+                # Capture hold durations BEFORE bulk_exit resets them (for graduated penalty)
+                exit_hold_durs = self.state_manager.pos_hold_dur[exit_indices].copy()
+                
                 # Determine price: ALWAYS Current Week (e0) due to restriction for new trades,
                 # but handle correctly if existing position is e1
                 opened_e_idxs = self.state_manager.pos_expiry_index[exit_indices]
@@ -775,6 +779,13 @@ class TradingEnv(gym.Env):
                 exit_prices = curr_data[rel_exits, exit_cols]
                 
                 self.state_manager.bulk_exit(exit_indices, exit_prices, timestamp=current_timestamp, extra_info=extra_info, regime=self.current_regime)
+                
+                # Graduated early exit penalty: penalizes exits before effective_min_hold
+                # Scales linearly from EARLY_EXIT_PENALTY_SCALE (at step 1) to 0 (at min_hold)
+                early_mask = exit_hold_durs < effective_min_hold
+                if np.any(early_mask):
+                    shortfall = (effective_min_hold - exit_hold_durs[early_mask]) / effective_min_hold
+                    total_penalty += np.sum(EARLY_EXIT_PENALTY_SCALE * shortfall)
             
             # Enters (Action 1: Buy Call, 2: Buy Put) - MUST respect masks
             buy_calls = (slot_actions[:, 0] == 1) & active_masks[:, 1]
@@ -870,7 +881,6 @@ class TradingEnv(gym.Env):
         
         # 3. Vectorized Position Updates & Intra-Candle SL Simulation
         act_mask = (self.state_manager.pos_type > 0)
-        total_penalty = 0.0
         if np.any(act_mask):
             a_idx = np.where(act_mask)[0]
             # Increment hold duration for all active positions that survived the step transition
