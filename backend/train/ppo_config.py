@@ -8,7 +8,7 @@ EVAL_DIR = os.path.join(REPORT_DIR, "evaluations")
 LOG_DIR = os.getenv("LOG_DIR", "ppo_trading_tensorboard")
 
 # --- Training Configuration ---
-TOTAL_TIMESTEPS = 5_000_000 # Increased budget for stabilization post-regression
+TOTAL_TIMESTEPS = 3_000_000 # Capped at 3.0M to prevent policy collapse/overfitting
 
 # --- Annealing Configuration ---
 INITIAL_LR = 3e-5               # Tuned to 3e-5 for stable/faster training convergence
@@ -96,7 +96,7 @@ EXIT_COOLDOWN_NORMAL = 2        # Standard baseline
 EXIT_COOLDOWN_HIGH_VOL = 1      # Minimal cooldown in high vol for rapid rotation
 MAX_TRADES_PER_DAY = 5          # Hard limit on trade entries per symbol per day
 SIM_AGGRESSION = 0.4            # Reduced from 0.5: lower false SL triggers from intra-candle simulation
-EARLY_EXIT_PENALTY_SCALE = 0.0008  # Graduated penalty for exiting before MIN_HOLD_STEPS (replaces hard action mask)
+EARLY_EXIT_PENALTY_SCALE = 0.016   # Graduated penalty scaled 20x (from 0.0008) to discourage immediate exits
 
 USE_CNN = True         # Toggle for 1D-CNN vs MlpPolicy
 
