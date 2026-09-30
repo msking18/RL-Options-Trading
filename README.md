@@ -243,9 +243,9 @@ For each active slot:
 #### Action Masking Rules (`action_masks()`):
 - **Empty Slot**: Disables `Exit`; forces Risk Profile to `None`.
 - **Occupied Slot**: Disables `Buy Call` and `Buy Put`.
-- **Insufficient Capital**: Disables all `Buy` actions if available capital $< \text{MIN\_TRADE\_VALUE}$ (₹250,000).
-- **Overtrading Safeguard**: Disables `Buy` actions if daily trades $\ge \text{MAX\_TRADES\_PER_DAY}$ (10).
-- **Penny Option Protection**: Disables `Buy` actions if option premium $< \text{MIN\_OPTION\_PRICE}$ (₹5).
+- **Insufficient Capital**: Disables all `Buy` actions if available capital < `MIN_TRADE_VALUE` (₹250,000).
+- **Overtrading Safeguard**: Disables `Buy` actions if daily trades ≥ `MAX_TRADES_PER_DAY` (10).
+- **Penny Option Protection**: Disables `Buy` actions if option premium < `MIN_OPTION_PRICE` (₹5).
 - **Inactive Slot**: Forces `Hold` action.
 
 ### Observation Vector Construction
@@ -272,9 +272,9 @@ $$\text{Worst Price} = P_{\text{entry}} \times \left(1 + \Delta \cdot \frac{S_{\
 
 $$\text{Best Price} = P_{\text{entry}} \times \left(1 + \Delta \cdot \frac{S_{\text{high}} - S_{\text{entry}}}{S_{\text{entry}}}\right)$$
 
-If an SL or TP threshold is breached intra-candle, the exit fill incorporates slippage via `SIM_AGGRESSION` ($0.4$):
+If an SL or TP threshold is breached intra-candle, the exit fill incorporates slippage via `SIM_AGGRESSION` (0.4):
 
-$$P_{\text{exit}} = P_{\text{SL}} + (P_{\text{worst}} - P_{\text{SL}}) \times \text{SIM\_AGGRESSION}$$
+$$P_{\text{exit}} = P_{\text{SL}} + (P_{\text{worst}} - P_{\text{SL}}) \times \text{Slippage}$$
 
 ### Reward Function Engineering
 
@@ -282,7 +282,7 @@ The step reward function $R_t$ balances profitability against capital protection
 
 $$R_t = R_{\text{PnL}} + R_{\text{Drawdown}} + R_{\text{Entry}} + R_{\text{Patience}} + R_{\text{Vol}} + R_{\text{Stale}}$$
 
-1. **PnL Reward**: Upon trade exit, $R_{\text{PnL}} = \frac{\Delta \text{Value}}{\text{Entry Value}} \times \text{REWARD\_SCALE}$.
+1. **PnL Reward**: Upon trade exit, $R_{\text{PnL}} = \frac{\Delta \text{Value}}{\text{Entry Value}} \times \text{Reward Scale}$.
 2. **Drawdown Penalty**: 
    - If Drawdown $> 3\%$ (Soft Threshold): Penalty proportional to drawdown $\times 2.0$.
    - If Drawdown $> 10\%$ (Hard Threshold): Heavy escalating exponential penalty.
@@ -323,7 +323,7 @@ The model uses a custom dual-head network architecture built on top of `Stable-B
 ```
 
 - **Policy Network (`pi`)**: Layers `[256, 128]` mapping extracted features to masked action probabilities.
-- **Value Network (`vf`)**: Scaled up to `[512, 256]` layers to enhance value estimation accuracy and maximize explained variance ($EV > 0.85$).
+- **Value Network (`vf`)**: Scaled up to `[512, 256]` layers to enhance value estimation accuracy and maximize explained variance (EV > 0.85).
 
 ---
 
@@ -347,10 +347,10 @@ Every RL run is evaluated side-by-side against 4 automated baseline strategies:
 ### Financial Metrics Computed
 
 - **Cumulative Return (%)**
-- **Annualized Sharpe Ratio** ($\text{Risk-Free Rate} = 5\%$)
+- **Annualized Sharpe Ratio** (Risk-Free Rate = 5%)
 - **Sortino Ratio** (Downside deviation risk-adjusted)
 - **Maximum Drawdown (%)** & Peak-to-Trough Duration
-- **Win Rate (%)** & Profit Factor ($\frac{\sum \text{Wins}}{\sum \text{Losses}}$)
+- **Win Rate (%)** & Profit Factor (Total Wins / Total Losses)
 - **Average Win / Average Loss Ratio**
 - **Average Trade Hold Duration (Candles)**
 
