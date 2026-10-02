@@ -6,7 +6,7 @@
 [![Market](https://img.shields.io/badge/Market-NSE%2FBSE%20India-red.svg)](https://www.nseindia.com/)
 [![License](https://img.shields.io/badge/License-MIT-brightgreen.svg)](LICENSE)
 
-An enterprise-grade, multi-modal **Reinforcement Learning (RL)** system engineered for automated **index options trading** on the Indian Stock Market (NSE / BSE). 
+An enterprise-grade, multi-modal **Reinforcement Learning (RL)** system engineered for automated **index options trading** on the Indian Stock Market (NSE / BSE) using Agentic AI development. 
 
 The system trains an autonomous trading agent using **Maskable Proximal Policy Optimization (MaskablePPO)** with custom 1D-CNN temporal feature extractors, continuous risk-adjusted reward shaping, Black-Scholes Greeks calculations, microsecond-level state management, and multi-source sentiment/macro signal integration.
 
